@@ -1,0 +1,91 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using TalkingPointsSummary.Data;
+using TalkingPointsSummary.Models;
+
+namespace TalkingPointsSummary.Services;
+
+/// <summary>
+/// Filters out messages that already exist in the database and saves new ones.
+/// </summary>
+public class MessageDeduplicator
+{
+    private readonly AppDbContext _db;
+    private readonly ILogger<MessageDeduplicator> _logger;
+
+    public MessageDeduplicator(AppDbContext db, ILogger<MessageDeduplicator> logger)
+    {
+        _db = db;
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Takes raw API messages, filters out duplicates, saves new ones to DB, and returns the saved messages.
+    /// </summary>
+    public async Task<List<Message>> DeduplicateAndSaveAsync(
+        Parent parent,
+        List<TalkingPointsMessage> apiMessages,
+        CancellationToken ct = default)
+    {
+        var existingIds = (await _db.Messages
+            .Where(m => m.ParentId == parent.Id)
+            .Select(m => m.ExternalMessageId)
+            .ToListAsync(ct))
+            .ToHashSet();
+
+        var newMessages = new List<Message>();
+
+        foreach (var apiMsg in apiMessages)
+        {
+            if (existingIds.Contains(apiMsg.Id))
+                continue;
+
+            var message = new Message
+            {
+                ParentId = parent.Id,
+                ExternalMessageId = apiMsg.Id,
+                ContactMessageId = apiMsg.ContactMessageId ?? string.Empty,
+                StudentName = apiMsg.ContactInfo?.StudentName ?? string.Empty,
+                FromName = apiMsg.From?.User?.Signature ?? apiMsg.FromName ?? string.Empty,
+                MessageText = apiMsg.Text ?? string.Empty,
+                SentAt = apiMsg.DisplayDate ?? apiMsg.CreatedAt ?? DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            newMessages.Add(message);
+        }
+
+        if (newMessages.Count > 0)
+        {
+            _db.Messages.AddRange(newMessages);
+            await _db.SaveChangesAsync(ct);
+            _logger.LogInformation("Saved {Count} new messages for parent {ParentName}", newMessages.Count, parent.Name);
+        }
+        else
+        {
+            _logger.LogInformation("No new messages for parent {ParentName}", parent.Name);
+        }
+
+        return newMessages;
+    }
+
+    /// <summary>
+    /// Returns all unprocessed messages for a parent.
+    /// </summary>
+    public async Task<List<Message>> GetUnprocessedAsync(Parent parent, CancellationToken ct = default)
+    {
+        return await _db.Messages
+            .Where(m => m.ParentId == parent.Id && m.ProcessedAt == null)
+            .OrderBy(m => m.SentAt)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Marks a message as processed.
+    /// </summary>
+    public async Task MarkProcessedAsync(Message message, CancellationToken ct = default)
+    {
+        message.ProcessedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+    }
+}

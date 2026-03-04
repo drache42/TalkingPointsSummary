@@ -1,0 +1,95 @@
+using System.CommandLine;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using TalkingPointsSummary.Commands;
+using TalkingPointsSummary.Configuration;
+using TalkingPointsSummary.Data;
+using TalkingPointsSummary.Pipeline;
+using TalkingPointsSummary.Services;
+
+// --- Build configuration from environment variables ---
+var appSettings = new AppSettings
+{
+    ConnectionString = Environment.GetEnvironmentVariable("CONNECTION_STRING")
+        ?? "Host=localhost;Database=talkingpoints;Username=postgres;Password=postgres",
+    AnthropicApiKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY") ?? string.Empty,
+    BrowserlessUrl = Environment.GetEnvironmentVariable("BROWSERLESS_URL") ?? "http://browserless:3000",
+    Smtp = new SmtpSettings
+    {
+        Host = Environment.GetEnvironmentVariable("SMTP_HOST") ?? "smtp.gmail.com",
+        Port = int.TryParse(Environment.GetEnvironmentVariable("SMTP_PORT"), out var port) ? port : 587,
+        Username = Environment.GetEnvironmentVariable("SMTP_USERNAME") ?? string.Empty,
+        Password = Environment.GetEnvironmentVariable("SMTP_PASSWORD") ?? string.Empty,
+        FromEmail = Environment.GetEnvironmentVariable("SMTP_FROM") ?? string.Empty,
+    },
+    ScheduleDayOfWeek = int.TryParse(Environment.GetEnvironmentVariable("SCHEDULE_DAY"), out var day) ? day : 1,
+    ScheduleHour = int.TryParse(Environment.GetEnvironmentVariable("SCHEDULE_HOUR"), out var hour) ? hour : 8,
+};
+
+// --- Build DI container (shared between CLI and Worker modes) ---
+var services = new ServiceCollection();
+
+// Configuration
+services.AddSingleton(Options.Create(appSettings));
+services.AddLogging(builder => builder.AddConsole());
+
+// Database
+services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(appSettings.ConnectionString));
+
+// HTTP clients
+services.AddHttpClient<TalkingPointsApiClient>();
+services.AddHttpClient<MessageCategorizer>();
+services.AddHttpClient<NewsletterScraper>();
+services.AddHttpClient<SummaryGenerator>();
+
+// Services
+services.AddScoped<MessageDeduplicator>();
+services.AddSingleton<MarkdownConverter>();
+services.AddScoped<EmailSender>();
+services.AddScoped<PipelineOrchestrator>();
+services.AddSingleton<WeeklyPipelineService>();
+
+var serviceProvider = services.BuildServiceProvider();
+
+// --- Apply database migrations on startup ---
+using (var scope = serviceProvider.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await db.Database.MigrateAsync();
+}
+
+// --- Route: CLI mode or Worker mode ---
+if (args.Length > 0)
+{
+    // CLI mode: parse commands and exit
+    var rootCommand = CommandHandler.BuildRootCommand(serviceProvider);
+    await rootCommand.InvokeAsync(args);
+}
+else
+{
+    // Worker mode: run as long-lived background service
+    Console.WriteLine("Starting Talking Points Summary worker service...");
+
+    var pipeline = serviceProvider.GetRequiredService<WeeklyPipelineService>();
+    await pipeline.StartAsync(CancellationToken.None);
+
+    // Keep alive until Ctrl+C / SIGTERM
+    var cts = new CancellationTokenSource();
+    Console.CancelKeyPress += (_, e) =>
+    {
+        e.Cancel = true;
+        cts.Cancel();
+    };
+
+    AppDomain.CurrentDomain.ProcessExit += (_, _) => cts.Cancel();
+
+    try
+    {
+        await Task.Delay(Timeout.Infinite, cts.Token);
+    }
+    catch (OperationCanceledException) { }
+
+    await pipeline.StopAsync(CancellationToken.None);
+    Console.WriteLine("Worker service stopped.");
+}

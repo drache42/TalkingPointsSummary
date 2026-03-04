@@ -1,0 +1,54 @@
+{
+  "data": {
+    "messages": [
+      {
+        "_id": "msg-test-001",
+        "contactMessageId": "contact-001",
+        "text": "Hello parents! Picture day is next Friday, March 6th. Please make sure your child comes to school in their photo outfit.",
+        "fromName": "Ms. Smith",
+        "from": {
+          "user": {
+            "signature": "Ms. Jane Smith"
+          }
+        },
+        "contactInfo": {
+          "studentName": "Clara Froehlich"
+        },
+        "createdAt": "2026-03-01T10:00:00.000Z",
+        "displayDate": "2026-03-01T10:30:00.000Z"
+      },
+      {
+        "_id": "msg-test-002",
+        "contactMessageId": "contact-002",
+        "text": "Weekly Newsletter: https://www.smore.com/abc123-cascadia-weekly",
+        "fromName": "Mr. Johnson",
+        "from": {
+          "user": {
+            "signature": "Mr. Bob Johnson"
+          }
+        },
+        "contactInfo": {
+          "studentName": "Nolan Froehlich"
+        },
+        "createdAt": "2026-02-28T14:00:00.000Z",
+        "displayDate": "2026-02-28T14:15:00.000Z"
+      },
+      {
+        "_id": "msg-test-003",
+        "contactMessageId": "contact-003",
+        "text": "No school on Monday, March 9th for teacher professional development day.",
+        "fromName": "Principal Davis",
+        "from": {
+          "user": {
+            "signature": "Principal Sarah Davis"
+          }
+        },
+        "contactInfo": {
+          "studentName": "Clara Froehlich"
+        },
+        "createdAt": "2026-02-27T09:00:00.000Z",
+        "displayDate": "2026-02-27T09:00:00.000Z"
+      }
+    ]
+  }
+}

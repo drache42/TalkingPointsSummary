@@ -1,0 +1,8 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "```json\n{\n  \"message_id\": \"msg-test-001\",\n  \"has_newsletter_url\": false,\n  \"newsletter_url\": null,\n  \"is_news_itself\": true,\n  \"summary\": \"School picture day is next Friday, March 6th\"\n}\n```"
+    }
+  ]
+}
