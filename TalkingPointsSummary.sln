@@ -1,7 +1,7 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.0.31903.59
+# Visual Studio Version 18
+VisualStudioVersion = 18.3.11520.95
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
 EndProject
@@ -10,6 +10,24 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TalkingPointsSummary.Tests", "tests\TalkingPointsSummary.Tests\TalkingPointsSummary.Tests.csproj", "{83B8B33E-5084-4799-8E6A-1236CD583104}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{DBB2F6CE-42AA-4444-97A1-A133B87A1E1E}"
+	ProjectSection(SolutionItems) = preProject
+		.env.example = .env.example
+		docker-compose.yml = docker-compose.yml
+		Dockerfile = Dockerfile
+		README.md = README.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{F596720C-1B25-41A4-A234-BB325ECEF00A}"
+	ProjectSection(SolutionItems) = preProject
+		docs\CLI.md = docs\CLI.md
+		docs\F5-DEBUGGING.md = docs\F5-DEBUGGING.md
+		docs\n8n-flow.json = docs\n8n-flow.json
+		TODO.md = TODO.md
+	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TalkingPointsSummary.AppHost", "src\TalkingPointsSummary.AppHost\TalkingPointsSummary.AppHost.csproj", "{73C8CA79-E516-49A9-94A7-E56E6C5A7AD3}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -45,6 +63,18 @@ Global
 		{83B8B33E-5084-4799-8E6A-1236CD583104}.Release|x64.Build.0 = Release|Any CPU
 		{83B8B33E-5084-4799-8E6A-1236CD583104}.Release|x86.ActiveCfg = Release|Any CPU
 		{83B8B33E-5084-4799-8E6A-1236CD583104}.Release|x86.Build.0 = Release|Any CPU
+		{73C8CA79-E516-49A9-94A7-E56E6C5A7AD3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{73C8CA79-E516-49A9-94A7-E56E6C5A7AD3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{73C8CA79-E516-49A9-94A7-E56E6C5A7AD3}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{73C8CA79-E516-49A9-94A7-E56E6C5A7AD3}.Debug|x64.Build.0 = Debug|Any CPU
+		{73C8CA79-E516-49A9-94A7-E56E6C5A7AD3}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{73C8CA79-E516-49A9-94A7-E56E6C5A7AD3}.Debug|x86.Build.0 = Debug|Any CPU
+		{73C8CA79-E516-49A9-94A7-E56E6C5A7AD3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{73C8CA79-E516-49A9-94A7-E56E6C5A7AD3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{73C8CA79-E516-49A9-94A7-E56E6C5A7AD3}.Release|x64.ActiveCfg = Release|Any CPU
+		{73C8CA79-E516-49A9-94A7-E56E6C5A7AD3}.Release|x64.Build.0 = Release|Any CPU
+		{73C8CA79-E516-49A9-94A7-E56E6C5A7AD3}.Release|x86.ActiveCfg = Release|Any CPU
+		{73C8CA79-E516-49A9-94A7-E56E6C5A7AD3}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -52,5 +82,10 @@ Global
 	GlobalSection(NestedProjects) = preSolution
 		{8959825D-0A08-45AA-ADF5-5580AE70D144} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{83B8B33E-5084-4799-8E6A-1236CD583104} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{73C8CA79-E516-49A9-94A7-E56E6C5A7AD3} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {5033803B-B09A-4121-AA59-A548EE3697A4}
+		StartupProject = {73C8CA79-E516-49A9-94A7-E56E6C5A7AD3}
 	EndGlobalSection
 EndGlobal

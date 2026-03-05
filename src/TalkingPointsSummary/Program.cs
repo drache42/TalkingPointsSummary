@@ -1,11 +1,30 @@
 using System.CommandLine;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
+using Serilog;
 using TalkingPointsSummary.Commands;
 using TalkingPointsSummary.Configuration;
 using TalkingPointsSummary.Data;
 using TalkingPointsSummary.Pipeline;
 using TalkingPointsSummary.Services;
+
+// --- Build IConfiguration (appsettings.json + environment variables) ---
+var environment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production";
+var configuration = new ConfigurationBuilder()
+    .SetBasePath(Directory.GetCurrentDirectory())
+    .AddJsonFile("appsettings.json", optional: false)
+    .AddJsonFile($"appsettings.{environment}.json", optional: true)
+    .AddEnvironmentVariables()
+    .Build();
+
+// --- Configure Serilog from appsettings ---
+Log.Logger = new LoggerConfiguration()
+    .ReadFrom.Configuration(configuration)
+    .CreateLogger();
+
+try
+{
 
 // --- Build configuration from environment variables ---
 var appSettings = new AppSettings
@@ -31,7 +50,7 @@ var services = new ServiceCollection();
 
 // Configuration
 services.AddSingleton(Options.Create(appSettings));
-services.AddLogging(builder => builder.AddConsole());
+services.AddLogging(builder => builder.ClearProviders().AddSerilog(Log.Logger));
 
 // Database
 services.AddDbContext<AppDbContext>(options =>
@@ -59,6 +78,8 @@ using (var scope = serviceProvider.CreateScope())
     await db.Database.MigrateAsync();
 }
 
+var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
+
 // --- Route: CLI mode or Worker mode ---
 if (args.Length > 0)
 {
@@ -69,7 +90,7 @@ if (args.Length > 0)
 else
 {
     // Worker mode: run as long-lived background service
-    Console.WriteLine("Starting Talking Points Summary worker service...");
+    logger.LogInformation("Starting Talking Points Summary worker service");
 
     var pipeline = serviceProvider.GetRequiredService<WeeklyPipelineService>();
     await pipeline.StartAsync(CancellationToken.None);
@@ -91,5 +112,16 @@ else
     catch (OperationCanceledException) { }
 
     await pipeline.StopAsync(CancellationToken.None);
-    Console.WriteLine("Worker service stopped.");
+    logger.LogInformation("Worker service stopped");
+}
+
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "Application terminated unexpectedly");
+    throw;
+}
+finally
+{
+    await Log.CloseAndFlushAsync();
 }

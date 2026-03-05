@@ -16,18 +16,23 @@ services:
       - SCHEDULE_DAY=1
       - SCHEDULE_HOUR=8
 
-  # Uncomment if you need a local Postgres instance for development
-  # postgres:
-  #   image: postgres:16-alpine
-  #   restart: unless-stopped
-  #   environment:
-  #     POSTGRES_DB: talkingpoints
-  #     POSTGRES_USER: postgres
-  #     POSTGRES_PASSWORD: postgres
-  #   volumes:
-  #     - pgdata:/var/lib/postgresql/data
-  #   ports:
-  #     - "5432:5432"
+  postgres:
+    image: postgres:15-alpine
+    container_name: talkingpoints-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: talkingpoints
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-# volumes:
-#   pgdata:
+volumes:
+  pgdata:

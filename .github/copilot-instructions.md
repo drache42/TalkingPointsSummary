@@ -43,6 +43,34 @@ Execute `git commit`, `git push`, `git merge`, `git rebase`, `git cherry-pick`, 
 
 ---
 
+## 🚫 No Autonomous Technology or Library Decisions
+
+**REQUIRED**: Before selecting any NuGet package, npm package, logging framework, ORM, serializer, test library, cloud SDK, or any other dependency that is **not already present** in the workspace, **STOP and ASK the user** which option they prefer.
+
+**REQUIRED BEHAVIOR** when a technology choice must be made:
+1. **Identify the decision point** (e.g., "A logging library is needed")
+2. **List the realistic options** with one-line descriptions
+3. **Ask the user to choose** — do NOT proceed with a default pick
+4. **Wait for an explicit answer** before writing any code that depends on that choice
+
+### Examples of decisions that require user input
+- Logging: Serilog vs NLog vs Microsoft.Extensions.Logging vs other
+- ORM / data access: EF Core vs Dapper vs ADO.NET vs other
+- HTTP client: RestSharp vs Refit vs plain HttpClient vs other
+- Testing: xUnit vs NUnit vs MSTest; Moq vs NSubstitute vs other
+- Serialization: System.Text.Json vs Newtonsoft.Json vs other
+- Any cloud or infrastructure SDK not already referenced
+
+### What counts as "already present"
+A package is "already present" only if it appears in a `.csproj`, `packages.config`, `package.json`, or equivalent file that you have **verified with a tool**. Do not assume a package is present.
+
+### Failure mode to avoid
+- ❌ Planning step says "use Serilog for logging" without user input
+- ❌ Writing code that references a package before confirming the user wants it
+- ✅ "A structured logging library is needed. Options: (1) Serilog, (2) NLog, (3) Microsoft.Extensions.Logging (built-in). Which would you like to use?"
+
+---
+
 ## 🚫 No Guessing or Hedging
 
 **REQUIRED**: Use only tool-verified, confirmed information in every response. When information cannot be resolved with available tools, state exactly what is missing and what you need to answer accurately. Write without hedging language ("probably", "likely", "might", "should", "I think", "presumably").
@@ -77,6 +105,7 @@ This rule applies to ALL responses, including technical details, code behavior, 
 
 <forbidden_actions>
 - DO NOT execute `git commit`, `git push`, `git merge`, `git rebase`, `git cherry-pick`, `git tag`, or `git branch -D` unless the user's message explicitly contains the words "commit" or "push"
+- DO NOT select, reference, or write code that depends on any NuGet package, npm package, or external library that is not already verified as present in the workspace — stop and ask the user to choose first
 - DO NOT use hedging language: "probably", "likely", "might", "should", "I think", "presumably", or equivalent
 - DO NOT fill information gaps with guesses — use tools to verify or explicitly state what is missing
 - DO NOT attempt a domain-specific task without first checking if a relevant skill is available
@@ -85,6 +114,7 @@ This rule applies to ALL responses, including technical details, code behavior, 
 <failure_criteria>
 The response is considered a failure if it:
 - Executes a destructive git command without the user explicitly saying "commit" or "push"
+- Selects or uses any package or external library not already verified as present in the workspace without first asking the user to choose
 - Contains hedging language or unverified assumptions stated as fact
 - Proceeds with a domain task without loading an applicable skill
 - Reports a code change without stopping before git operations

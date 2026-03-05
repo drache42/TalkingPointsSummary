@@ -107,7 +107,25 @@ Check your email for the weekly summary. The service will now automatically run 
 
 ## Local Development
 
+### F5 Debugging in Visual Studio
+
+The solution uses [.NET Aspire](https://learn.microsoft.com/en-us/dotnet/aspire/get-started/aspire-overview) to orchestrate local dependencies. Set `TalkingPointsSummary.AppHost` as the startup project and press **F5**:
+
+- PostgreSQL starts automatically in Docker, waits until healthy
+- Worker Service starts with the connection string injected
+- Aspire dashboard opens showing logs and resource health
+- Stopping the debugger shuts the container down
+
+**On a machine with external PostgreSQL:** Set `ManagePostgres: false` and supply a connection string in the AppHost via user secrets — no code changes needed. See [docs/F5-DEBUGGING.md](docs/F5-DEBUGGING.md).
+
+**Prerequisite:** Docker Desktop running with `postgres:15-alpine` pulled.
+
+### Manual Development
+
 ```bash
+# Start PostgreSQL manually
+docker-compose up -d postgres
+
 # Restore and build
 dotnet restore
 dotnet build
@@ -118,6 +136,9 @@ dotnet test
 # Run locally (requires Postgres + env vars)
 cd src/TalkingPointsSummary
 dotnet run
+
+# Stop PostgreSQL
+docker-compose down
 ```
 
 ## Database Schema
