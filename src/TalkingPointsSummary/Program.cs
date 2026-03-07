@@ -85,7 +85,7 @@ if (args.Length > 0)
 {
     // CLI mode: parse commands and exit
     var rootCommand = CommandHandler.BuildRootCommand(serviceProvider);
-    await rootCommand.InvokeAsync(args);
+    await rootCommand.Parse(args).InvokeAsync();
 }
 else
 {

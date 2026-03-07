@@ -36,3 +36,22 @@ dotnet user-secrets set ConnectionStrings:postgres "Host=...;Database=talkingpoi
 ```
 
 The Worker Service code is unaffected in either case.
+
+## Running the Worker Directly (Without Aspire)
+
+If you want to run or debug the `TalkingPointsSummary` worker project directly — without starting the AppHost — the connection string is read from `CONNECTION_STRING` in `src/TalkingPointsSummary/Properties/launchSettings.json`:
+
+```json
+"CONNECTION_STRING": "Host=localhost;Database=talkingpoints;Username=postgres;Password=postgres"
+```
+
+Update that value to match your local PostgreSQL instance. This file is committed with the default localhost credentials, so adjust it for your machine without committing the change if your credentials differ.
+
+Alternatively, use `dotnet user-secrets` on the worker project so no file change is needed:
+
+```bash
+cd src/TalkingPointsSummary
+dotnet user-secrets set CONNECTION_STRING "Host=myserver;Database=talkingpoints;Username=postgres;Password=secret"
+```
+
+> **Note:** User secrets take precedence over `launchSettings.json` environment variables when running via `dotnet run` or Visual Studio.

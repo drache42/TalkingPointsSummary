@@ -1,6 +1,6 @@
 # Talking Points Summary
 
-A .NET 8 Worker Service that automatically fetches school messages from [TalkingPoints](https://talkingpts.org), categorizes them with AI, scrapes newsletter links, and emails a weekly parent briefing every Monday morning.
+A .NET 10 Worker Service that automatically fetches school messages
 
 ## Architecture
 

@@ -1,3 +1,4 @@
+using Aspire.Hosting;
 using Microsoft.Extensions.Configuration;
 
 var builder = DistributedApplication.CreateBuilder(args);
@@ -5,8 +6,11 @@ var builder = DistributedApplication.CreateBuilder(args);
 if (builder.Configuration.GetValue<bool>("ManagePostgres", true))
 {
     // Aspire manages a local PostgreSQL container (default for Docker-based dev machines)
-    var postgres = builder.AddPostgres("postgres")
-        .WithImage("postgres", "15-alpine");
+    var postgresPassword = builder.AddParameter("postgres-password", secret: true);
+
+    var postgres = builder.AddPostgres("postgres", password: postgresPassword)
+        .WithImage("postgres", "15-alpine")
+        .WithDataVolume("talkingpoints-postgres-data");
 
     var db = postgres.AddDatabase("talkingpoints");
 

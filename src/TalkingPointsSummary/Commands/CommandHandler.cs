@@ -16,31 +16,36 @@ public static class CommandHandler
     {
         var rootCommand = new RootCommand("Talking Points Summary - Weekly school message digest");
 
-        rootCommand.AddCommand(BuildAddParentCommand(services));
-        rootCommand.AddCommand(BuildAddChildCommand(services));
-        rootCommand.AddCommand(BuildListParentsCommand(services));
-        rootCommand.AddCommand(BuildRemoveParentCommand(services));
-        rootCommand.AddCommand(BuildRemoveChildCommand(services));
-        rootCommand.AddCommand(BuildRunCommand(services));
+        rootCommand.Add(BuildAddParentCommand(services));
+        rootCommand.Add(BuildAddChildCommand(services));
+        rootCommand.Add(BuildListParentsCommand(services));
+        rootCommand.Add(BuildRemoveParentCommand(services));
+        rootCommand.Add(BuildRemoveChildCommand(services));
+        rootCommand.Add(BuildRunCommand(services));
 
         return rootCommand;
     }
 
     private static Command BuildAddParentCommand(IServiceProvider services)
     {
-        var nameOption = new Option<string>("--name", "Parent family name") { IsRequired = true };
-        var tokenOption = new Option<string>("--token", "TalkingPoints x-token") { IsRequired = true };
-        var contactIdOption = new Option<string>("--contact-id", "TalkingPoints x-contactid") { IsRequired = true };
-        var emailsOption = new Option<string>("--emails", "Semicolon-delimited email addresses") { IsRequired = true };
+        var nameOption = new Option<string>("--name") { Description = "Parent family name", Required = true };
+        var tokenOption = new Option<string>("--token") { Description = "TalkingPoints x-token", Required = true };
+        var contactIdOption = new Option<string>("--contact-id") { Description = "TalkingPoints x-contactid", Required = true };
+        var emailsOption = new Option<string>("--emails") { Description = "Semicolon-delimited email addresses", Required = true };
 
         var command = new Command("add-parent", "Register a new parent");
-        command.AddOption(nameOption);
-        command.AddOption(tokenOption);
-        command.AddOption(contactIdOption);
-        command.AddOption(emailsOption);
+        command.Add(nameOption);
+        command.Add(tokenOption);
+        command.Add(contactIdOption);
+        command.Add(emailsOption);
 
-        command.SetHandler(async (name, token, contactId, emails) =>
+        command.SetAction(async (parseResult) =>
         {
+            var name = parseResult.GetValue(nameOption)!;
+            var token = parseResult.GetValue(tokenOption)!;
+            var contactId = parseResult.GetValue(contactIdOption)!;
+            var emails = parseResult.GetValue(emailsOption)!;
+
             using var scope = services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
@@ -58,30 +63,37 @@ public static class CommandHandler
             await db.SaveChangesAsync();
 
             Console.WriteLine($"Added parent '{name}' with ID {parent.Id}");
-        }, nameOption, tokenOption, contactIdOption, emailsOption);
+        });
 
         return command;
     }
 
     private static Command BuildAddChildCommand(IServiceProvider services)
     {
-        var parentIdOption = new Option<int>("--parent-id", "Parent ID") { IsRequired = true };
-        var nameOption = new Option<string>("--name", "Child's name") { IsRequired = true };
-        var schoolOption = new Option<string>("--school", "School name") { IsRequired = true };
-        var gradeOption = new Option<int>("--grade", "Starting grade (0=Kindergarten)") { IsRequired = true };
-        var yearOption = new Option<int>("--year", "Starting school year (e.g. 2025)") { IsRequired = true };
-        var emojiOption = new Option<string>("--emoji", () => "📚", "Emoji for summary headings");
+        var parentIdOption = new Option<int>("--parent-id") { Description = "Parent ID", Required = true };
+        var nameOption = new Option<string>("--name") { Description = "Child's name", Required = true };
+        var schoolOption = new Option<string>("--school") { Description = "School name", Required = true };
+        var gradeOption = new Option<int>("--grade") { Description = "Starting grade (0=Kindergarten)", Required = true };
+        var yearOption = new Option<int>("--year") { Description = "Starting school year (e.g. 2025)", Required = true };
+        var emojiOption = new Option<string>("--emoji") { Description = "Emoji for summary headings", DefaultValueFactory = _ => "📚" };
 
         var command = new Command("add-child", "Add a child to a parent");
-        command.AddOption(parentIdOption);
-        command.AddOption(nameOption);
-        command.AddOption(schoolOption);
-        command.AddOption(gradeOption);
-        command.AddOption(yearOption);
-        command.AddOption(emojiOption);
+        command.Add(parentIdOption);
+        command.Add(nameOption);
+        command.Add(schoolOption);
+        command.Add(gradeOption);
+        command.Add(yearOption);
+        command.Add(emojiOption);
 
-        command.SetHandler(async (parentId, name, school, grade, year, emoji) =>
+        command.SetAction(async (parseResult) =>
         {
+            var parentId = parseResult.GetValue(parentIdOption);
+            var name = parseResult.GetValue(nameOption)!;
+            var school = parseResult.GetValue(schoolOption)!;
+            var grade = parseResult.GetValue(gradeOption);
+            var year = parseResult.GetValue(yearOption);
+            var emoji = parseResult.GetValue(emojiOption)!;
+
             using var scope = services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
@@ -107,7 +119,7 @@ public static class CommandHandler
             await db.SaveChangesAsync();
 
             Console.WriteLine($"Added child '{name}' (ID {child.Id}) to parent '{parent.Name}'");
-        }, parentIdOption, nameOption, schoolOption, gradeOption, yearOption, emojiOption);
+        });
 
         return command;
     }
@@ -116,7 +128,7 @@ public static class CommandHandler
     {
         var command = new Command("list-parents", "List all parents and their children");
 
-        command.SetHandler(async () =>
+        command.SetAction(async (parseResult) =>
         {
             using var scope = services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -159,13 +171,15 @@ public static class CommandHandler
 
     private static Command BuildRemoveParentCommand(IServiceProvider services)
     {
-        var idOption = new Option<int>("--id", "Parent ID to remove") { IsRequired = true };
+        var idOption = new Option<int>("--id") { Description = "Parent ID to remove", Required = true };
 
         var command = new Command("remove-parent", "Remove a parent and all associated data");
-        command.AddOption(idOption);
+        command.Add(idOption);
 
-        command.SetHandler(async (id) =>
+        command.SetAction(async (parseResult) =>
         {
+            var id = parseResult.GetValue(idOption);
+
             using var scope = services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
@@ -181,20 +195,22 @@ public static class CommandHandler
             await db.SaveChangesAsync();
 
             Console.WriteLine($"Removed parent '{parent.Name}' (ID {id}) and all associated data");
-        }, idOption);
+        });
 
         return command;
     }
 
     private static Command BuildRemoveChildCommand(IServiceProvider services)
     {
-        var idOption = new Option<int>("--id", "Child ID to remove") { IsRequired = true };
+        var idOption = new Option<int>("--id") { Description = "Child ID to remove", Required = true };
 
         var command = new Command("remove-child", "Remove a child");
-        command.AddOption(idOption);
+        command.Add(idOption);
 
-        command.SetHandler(async (id) =>
+        command.SetAction(async (parseResult) =>
         {
+            var id = parseResult.GetValue(idOption);
+
             using var scope = services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
@@ -210,7 +226,7 @@ public static class CommandHandler
             await db.SaveChangesAsync();
 
             Console.WriteLine($"Removed child '{child.Name}' (ID {id})");
-        }, idOption);
+        });
 
         return command;
     }
@@ -219,7 +235,7 @@ public static class CommandHandler
     {
         var command = new Command("run", "Manually trigger the full pipeline for all active parents");
 
-        command.SetHandler(async () =>
+        command.SetAction(async (parseResult) =>
         {
             using var scope = services.CreateScope();
             var pipeline = scope.ServiceProvider.GetRequiredService<WeeklyPipelineService>();
