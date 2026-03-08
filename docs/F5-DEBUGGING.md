@@ -55,3 +55,15 @@ dotnet user-secrets set CONNECTION_STRING "Host=myserver;Database=talkingpoints;
 ```
 
 > **Note:** User secrets take precedence over `launchSettings.json` environment variables when running via `dotnet run` or Visual Studio.
+
+## First-Time Setup: Generating Migrations
+
+If this is a fresh clone with no migration files present, generate them once before running the app.
+
+**No database or Aspire session required.** The project includes `AppDbContextFactory`, which the EF tooling uses directly to build the `DbContext` from your model classes — it never executes `Program.cs` or connects to the database.
+
+```bash
+dotnet ef migrations add InitialCreate --project src/TalkingPointsSummary
+```
+
+Commit the generated files under `src/TalkingPointsSummary/Migrations/`. After that, `MigrateAsync()` in `Program.cs` applies the migration automatically on every startup in every environment (local, Docker, production). You never need to run `dotnet ef database update` or any migration command in production.

@@ -130,6 +130,10 @@ docker-compose up -d postgres
 dotnet restore
 dotnet build
 
+# Generate EF Core migration files (first time only — no database or Aspire required)
+# Once generated, commit them. The app applies migrations automatically on startup.
+dotnet ef migrations add InitialCreate --project src/TalkingPointsSummary
+
 # Run tests
 dotnet test
 

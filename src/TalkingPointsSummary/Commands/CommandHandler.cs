@@ -22,6 +22,7 @@ public static class CommandHandler
         rootCommand.Add(BuildRemoveParentCommand(services));
         rootCommand.Add(BuildRemoveChildCommand(services));
         rootCommand.Add(BuildRunCommand(services));
+        rootCommand.Add(BuildCheckConfigCommand(services));
 
         return rootCommand;
     }
@@ -243,6 +244,49 @@ public static class CommandHandler
             Console.WriteLine("Starting manual pipeline run...");
             await pipeline.RunFullPipelineAsync();
             Console.WriteLine("Pipeline run complete.");
+        });
+
+        return command;
+    }
+
+    private static Command BuildCheckConfigCommand(IServiceProvider services)
+    {
+        var command = new Command("check-config", "Verify all required secrets and external service connections");
+
+        command.SetAction(async (parseResult) =>
+        {
+            Console.WriteLine("Checking configuration and connectivity...\n");
+
+            using var scope = services.CreateScope();
+            var validator = scope.ServiceProvider.GetRequiredService<TalkingPointsSummary.Services.StartupValidator>();
+            var results = await validator.RunAllChecksAsync();
+
+            var labelWidth = results.Max(r => r.Name.Length) + 2;
+
+            foreach (var result in results)
+            {
+                var icon = result.Status switch
+                {
+                    TalkingPointsSummary.Services.CheckStatus.Pass => "✅ PASS",
+                    TalkingPointsSummary.Services.CheckStatus.Warn => "⚠️  WARN",
+                    TalkingPointsSummary.Services.CheckStatus.Fail => "❌ FAIL",
+                    _ => "     "
+                };
+                Console.WriteLine($"{icon}  {result.Name.PadRight(labelWidth)}{result.Detail}");
+            }
+
+            var failCount = results.Count(r => r.Status == TalkingPointsSummary.Services.CheckStatus.Fail);
+            Console.WriteLine();
+
+            if (failCount == 0)
+            {
+                Console.WriteLine("All checks passed.");
+            }
+            else
+            {
+                Console.Error.WriteLine($"{failCount} check(s) failed. Review the output above.");
+                Environment.ExitCode = 1;
+            }
         });
 
         return command;

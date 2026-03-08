@@ -68,6 +68,7 @@ services.AddSingleton<MarkdownConverter>();
 services.AddScoped<EmailSender>();
 services.AddScoped<PipelineOrchestrator>();
 services.AddSingleton<WeeklyPipelineService>();
+services.AddScoped<StartupValidator>();
 
 var serviceProvider = services.BuildServiceProvider();
 
@@ -91,6 +92,30 @@ else
 {
     // Worker mode: run as long-lived background service
     logger.LogInformation("Starting Talking Points Summary worker service");
+
+    using (var validationScope = serviceProvider.CreateScope())
+    {
+        var validator = validationScope.ServiceProvider.GetRequiredService<StartupValidator>();
+        var results = await validator.RunAllChecksAsync();
+
+        foreach (var result in results)
+        {
+            var level = result.Status switch
+            {
+                CheckStatus.Pass => Microsoft.Extensions.Logging.LogLevel.Information,
+                CheckStatus.Warn => Microsoft.Extensions.Logging.LogLevel.Warning,
+                _ => Microsoft.Extensions.Logging.LogLevel.Error
+            };
+            logger.Log(level, "[{Status}] {Name}: {Detail}", result.Status, result.Name, result.Detail);
+        }
+
+        var failCount = results.Count(r => r.Status == CheckStatus.Fail);
+        if (failCount > 0)
+        {
+            logger.LogCritical("{FailCount} startup check(s) failed. Aborting worker.", failCount);
+            Environment.Exit(1);
+        }
+    }
 
     var pipeline = serviceProvider.GetRequiredService<WeeklyPipelineService>();
     await pipeline.StartAsync(CancellationToken.None);
