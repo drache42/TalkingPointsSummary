@@ -24,6 +24,8 @@ services:
       # Schedule: Monday (1) at 8 AM UTC
       - SCHEDULE_DAY=1
       - SCHEDULE_HOUR=8
+    volumes:
+      - ${TPS_LOGS_PATH:-./docker-data/logs}:/app/logs
 
   admin:
     build:

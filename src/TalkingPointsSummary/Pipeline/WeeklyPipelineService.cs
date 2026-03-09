@@ -12,7 +12,8 @@ namespace TalkingPointsSummary.Pipeline;
 public enum PipelineRunStatus
 {
     Completed,
-    AlreadyRunning
+    AlreadyRunning,
+    ParentNotFound
 }
 
 /// <summary>
@@ -121,14 +122,19 @@ public class WeeklyPipelineService : BackgroundService
     /// </summary>
     public async Task RunFullPipelineAsync(CancellationToken ct = default)
     {
-        var result = await TryRunFullPipelineAsync("manual", ct);
+        var result = await TryRunFullPipelineAsync("manual", parentId: null, ct);
         if (result == PipelineRunStatus.AlreadyRunning)
             throw new InvalidOperationException("A pipeline run is already in progress.");
+        if (result == PipelineRunStatus.ParentNotFound)
+            throw new InvalidOperationException("The requested parent was not found or is inactive.");
     }
 
     public bool IsRunInProgress => Volatile.Read(ref _isRunInProgress) == 1;
 
     public async Task<PipelineRunStatus> TryRunFullPipelineAsync(string trigger, CancellationToken ct = default)
+        => await TryRunFullPipelineAsync(trigger, parentId: null, ct);
+
+    public async Task<PipelineRunStatus> TryRunFullPipelineAsync(string trigger, int? parentId, CancellationToken ct = default)
     {
         if (!await _runLock.WaitAsync(TimeSpan.Zero, ct))
             return PipelineRunStatus.AlreadyRunning;
@@ -137,10 +143,20 @@ public class WeeklyPipelineService : BackgroundService
 
         try
         {
-            _logger.LogInformation("Pipeline run started by {Trigger}", trigger);
-            await RunPipelineCoreAsync(ct);
-            _logger.LogInformation("Pipeline run started by {Trigger} completed", trigger);
-            return PipelineRunStatus.Completed;
+            _logger.LogInformation("Pipeline run started by {Trigger}{Scope}",
+                trigger,
+                parentId.HasValue ? $" for parent {parentId.Value}" : " for all active parents");
+
+            var result = await RunPipelineCoreAsync(parentId, ct);
+
+            if (result == PipelineRunStatus.Completed)
+            {
+                _logger.LogInformation("Pipeline run started by {Trigger}{Scope} completed",
+                    trigger,
+                    parentId.HasValue ? $" for parent {parentId.Value}" : " for all active parents");
+            }
+
+            return result;
         }
         finally
         {
@@ -149,16 +165,29 @@ public class WeeklyPipelineService : BackgroundService
         }
     }
 
-    private async Task RunPipelineCoreAsync(CancellationToken ct)
+    private async Task<PipelineRunStatus> RunPipelineCoreAsync(int? parentId, CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var orchestrator = scope.ServiceProvider.GetRequiredService<PipelineOrchestrator>();
 
-        var parents = await db.Parents
+        var parentQuery = db.Parents
             .Where(p => p.IsActive)
             .Include(p => p.Children)
-            .ToListAsync(ct);
+            .AsQueryable();
+
+        if (parentId.HasValue)
+        {
+            parentQuery = parentQuery.Where(p => p.Id == parentId.Value);
+        }
+
+        var parents = await parentQuery.ToListAsync(ct);
+
+        if (parentId.HasValue && parents.Count == 0)
+        {
+            _logger.LogWarning("Requested pipeline run for parent {ParentId}, but no active parent was found", parentId.Value);
+            return PipelineRunStatus.ParentNotFound;
+        }
 
         _logger.LogInformation("Running pipeline for {Count} active parent(s)", parents.Count);
 
@@ -176,5 +205,6 @@ public class WeeklyPipelineService : BackgroundService
         }
 
         _logger.LogInformation("Weekly pipeline run complete");
+        return PipelineRunStatus.Completed;
     }
 }

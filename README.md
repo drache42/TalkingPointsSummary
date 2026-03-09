@@ -63,6 +63,26 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+The worker writes rolling log files to `/app/logs` inside the container. By default, `docker-compose.yml` bind-mounts that to `./docker-data/logs` on the host:
+
+```yaml
+volumes:
+  - ${TPS_LOGS_PATH:-./docker-data/logs}:/app/logs
+```
+
+If you want the same pattern as your other services, set `TPS_LOGS_PATH` to a host folder before starting the stack, for example:
+
+```bash
+TPS_LOGS_PATH=/volume1/docker-volumes/talking-points-summary/logs docker compose up -d --build
+```
+
+Or hardcode the host path directly in `docker-compose.yml`:
+
+```yaml
+volumes:
+  - /volume1/docker-volumes/talking-points-summary/logs:/app/logs
+```
+
 ### 3. Add a parent and children
 
 ```bash

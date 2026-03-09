@@ -26,6 +26,8 @@ public class CategorizationResult
 /// </summary>
 public partial class MessageCategorizer
 {
+    private static readonly MessageCategorizationPromptBuilder PromptBuilder = new();
+
     private readonly HttpClient _httpClient;
     private readonly AppSettings _settings;
     private readonly ILogger<MessageCategorizer> _logger;
@@ -45,7 +47,7 @@ public partial class MessageCategorizer
         _logger.LogInformation("Categorizing message {MessageId} from {FromName}",
             message.ExternalMessageId, message.FromName);
 
-        var prompt = BuildPrompt(message);
+        var prompt = PromptBuilder.Build(message);
 
         var requestBody = new
         {
@@ -100,37 +102,6 @@ public partial class MessageCategorizer
                 Summary = "Unable to categorize"
             };
         }
-    }
-
-    private static string BuildPrompt(Message message)
-    {
-        return $$"""
-            You are analyzing school messages to categorize them. Respond ONLY with valid JSON.
-
-            Analyze this message and determine:
-            1. Does it contain a newsletter URL? (look for links to school newsletters, typically smore.com or similar)
-            2. Is the message itself important news? (announcements, events, deadlines, holidays, school updates)
-
-            Message from: {{message.FromName}}
-            Date: {{message.SentAt:O}}
-            Text: {{message.MessageText}}
-            MessageID: {{message.ExternalMessageId}}
-
-            Respond with this exact JSON structure:
-            {
-              "message_id": "MessageId that was passed in",
-              "has_newsletter_url": true or false,
-              "newsletter_url": "the URL if found, otherwise null",
-              "is_news_itself": true or false,
-              "summary": "brief 1-sentence description of what this is"
-            }
-
-            Rules:
-            * `has_newsletter_url`: set to true if the message contains a URL to a newsletter (e.g. smore.com or similar). Extract the URL into newsletter_url.
-            * `is_news_itself`: set to true if the message body contains actual news, announcements, events, deadlines, reminders, or school updates. These two fields are independent — a message can have both a newsletter link AND be news itself.
-            * Assume messages are news by default. Only set `is_news_itself` to false if the message is purely a newsletter link with little or no additional content (e.g. "Here is the newsletter: [url]" or "Weekly news [url]").
-            * `summary` should always be a brief 1-sentence description of the message content, regardless of classification.
-            """;
     }
 
     [GeneratedRegex(@"```json|```")]

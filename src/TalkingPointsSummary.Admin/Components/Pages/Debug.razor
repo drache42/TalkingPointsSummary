@@ -34,10 +34,36 @@ else
                 <p class="small text-muted mb-3">Target: @PipelineDebugClient.BaseUrl</p>
             }
 
+            <div class="mb-3">
+                <label class="form-label" for="run-parent-scope">Run scope</label>
+                <select id="run-parent-scope"
+                        class="form-select"
+                        @bind="_selectedParentIdValue"
+                        disabled="@(_isRunning || _parentOptionsLoading)">
+                    <option value="">All active parents</option>
+                    @foreach (var parent in _parentOptions)
+                    {
+                        <option value="@parent.Id.ToString()">@parent.DisplayName</option>
+                    }
+                </select>
+                @if (_parentOptionsLoading)
+                {
+                    <div class="form-text">Loading active parents...</div>
+                }
+                else if (_parentOptions.Count == 0)
+                {
+                    <div class="form-text text-warning">No active parents are available.</div>
+                }
+                else
+                {
+                    <div class="form-text">Choose a single active parent or leave it on all active parents.</div>
+                }
+            </div>
+
             <button class="btn btn-danger"
                     @onclick="RunNowAsync"
-                    disabled="@(_isRunning || !PipelineDebugClient.IsConfigured)">
-                @(_isRunning ? "Running..." : "Run Now")
+                    disabled="@(_isRunning || !PipelineDebugClient.IsConfigured || _parentOptionsLoading)">
+                @(_isRunning ? "Running..." : SelectedParentId.HasValue ? "Run Selected Parent" : "Run All Parents")
             </button>
         </div>
     </div>
@@ -49,12 +75,41 @@ else
                 Delete all messages, summaries, and news items while keeping parents and children.
             </p>
 
+            <div class="mb-3">
+                <label class="form-label" for="delete-parent-scope">Delete scope</label>
+                <select id="delete-parent-scope"
+                        class="form-select"
+                        @bind="_selectedDeleteParentIdValue"
+                        @bind:after="OnDeleteScopeChangedAsync"
+                        disabled="@(_isClearingData || _deleteParentOptionsLoading)">
+                    <option value="">All parents</option>
+                    @foreach (var parent in _deleteParentOptions)
+                    {
+                        <option value="@parent.Id.ToString()">@parent.DisplayName</option>
+                    }
+                </select>
+                @if (_deleteParentOptionsLoading)
+                {
+                    <div class="form-text">Loading parents...</div>
+                }
+                else if (_deleteParentOptions.Count == 0)
+                {
+                    <div class="form-text text-warning">No parents are available.</div>
+                }
+                else
+                {
+                    <div class="form-text">Delete data for one parent or leave it on all parents.</div>
+                }
+            </div>
+
             @if (_dataCountsLoading)
             {
                 <p class="text-muted mb-3">Loading current counts...</p>
             }
             else
             {
+                <p class="small text-muted mb-3">Showing counts for @(SelectedDeleteParentId.HasValue ? $"parent {SelectedDeleteParentId.Value}" : "all parents").</p>
+
                 <div class="row g-3 mb-3">
                     <div class="col-sm-4">
                         <div class="border rounded p-3 bg-light-subtle h-100">
@@ -83,14 +138,14 @@ else
                        type="checkbox"
                        @bind="_confirmClearData" />
                 <label class="form-check-label" for="confirm-clear-data">
-                    I understand this deletes all messages, summaries, and news items.
+                    I understand this deletes the selected messages, summaries, and news items.
                 </label>
             </div>
 
             <button class="btn btn-outline-danger"
                     @onclick="ClearPipelineDataAsync"
                     disabled="@(_isClearingData || !_confirmClearData)">
-                @(_isClearingData ? "Deleting..." : "Delete Messages, Summaries, News")
+                @(_isClearingData ? "Deleting..." : SelectedDeleteParentId.HasValue ? "Delete Selected Parent Data" : "Delete All Parent Data")
             </button>
         </div>
     </div>
@@ -114,8 +169,11 @@ else
     private bool _isRunning;
     private bool? _lastRunSucceeded;
     private bool _lastRunWasConflict;
+    private bool _lastRunParentNotFound;
     private string? _runStatusMessage;
     private bool _dataCountsLoading = true;
+    private bool _parentOptionsLoading = true;
+    private bool _deleteParentOptionsLoading = true;
     private bool _isClearingData;
     private bool _confirmClearData;
     private int _messageCount;
@@ -123,6 +181,18 @@ else
     private int _newsItemCount;
     private bool? _lastClearSucceeded;
     private string? _clearStatusMessage;
+    private string? _selectedParentIdValue;
+    private string? _selectedDeleteParentIdValue;
+    private List<DebugParentOption> _parentOptions = [];
+    private List<DebugParentOption> _deleteParentOptions = [];
+
+    private int? SelectedParentId => int.TryParse(_selectedParentIdValue, out var parentId)
+        ? parentId
+        : null;
+
+    private int? SelectedDeleteParentId => int.TryParse(_selectedDeleteParentIdValue, out var parentId)
+        ? parentId
+        : null;
 
     private string RunStatusAlertClass => _isRunning
         ? "alert-info"
@@ -130,6 +200,8 @@ else
             ? "alert-success"
             : _lastRunWasConflict
                 ? "alert-warning"
+                : _lastRunParentNotFound
+                    ? "alert-warning"
                 : "alert-danger";
 
     private string ClearStatusAlertClass => _isClearingData
@@ -140,6 +212,8 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        await LoadParentOptionsAsync();
+        await LoadDeleteParentOptionsAsync();
         await LoadDataCountsAsync();
     }
 
@@ -148,19 +222,24 @@ else
         _isRunning = true;
         _lastRunSucceeded = null;
         _lastRunWasConflict = false;
-        _runStatusMessage = "Running pipeline...";
+        _lastRunParentNotFound = false;
+        _runStatusMessage = SelectedParentId.HasValue
+            ? $"Running pipeline for parent {SelectedParentId.Value}..."
+            : "Running pipeline for all active parents...";
 
         try
         {
-            var result = await PipelineDebugClient.RunNowAsync();
+            var result = await PipelineDebugClient.RunNowAsync(SelectedParentId);
             _lastRunSucceeded = result.Success;
             _lastRunWasConflict = result.AlreadyRunning;
+            _lastRunParentNotFound = result.ParentNotFound;
             _runStatusMessage = result.Message;
         }
         catch (Exception ex)
         {
             _lastRunSucceeded = false;
             _lastRunWasConflict = false;
+            _lastRunParentNotFound = false;
             _runStatusMessage = $"Pipeline trigger failed: {ex.Message}";
         }
         finally
@@ -180,15 +259,29 @@ else
             await using var db = await DbFactory.CreateDbContextAsync();
             await using var transaction = await db.Database.BeginTransactionAsync();
 
-            var deletedMessages = await db.Messages.ExecuteDeleteAsync();
-            var deletedSummaries = await db.Summaries.ExecuteDeleteAsync();
-            var deletedNewsItems = await db.NewsItems.ExecuteDeleteAsync();
+            var messageQuery = db.Messages.AsQueryable();
+            var summaryQuery = db.Summaries.AsQueryable();
+            var newsItemQuery = db.NewsItems.AsQueryable();
+
+            if (SelectedDeleteParentId.HasValue)
+            {
+                var parentId = SelectedDeleteParentId.Value;
+                messageQuery = messageQuery.Where(message => message.ParentId == parentId);
+                summaryQuery = summaryQuery.Where(summary => summary.ParentId == parentId);
+                newsItemQuery = newsItemQuery.Where(newsItem => newsItem.ParentId == parentId);
+            }
+
+            var deletedMessages = await messageQuery.ExecuteDeleteAsync();
+            var deletedSummaries = await summaryQuery.ExecuteDeleteAsync();
+            var deletedNewsItems = await newsItemQuery.ExecuteDeleteAsync();
 
             await transaction.CommitAsync();
 
             _lastClearSucceeded = true;
             _confirmClearData = false;
-            _clearStatusMessage = $"Deleted {deletedMessages} messages, {deletedSummaries} summaries, and {deletedNewsItems} news items.";
+            _clearStatusMessage = SelectedDeleteParentId.HasValue
+                ? $"Deleted {deletedMessages} messages, {deletedSummaries} summaries, and {deletedNewsItems} news items for parent {SelectedDeleteParentId.Value}."
+                : $"Deleted {deletedMessages} messages, {deletedSummaries} summaries, and {deletedNewsItems} news items for all parents.";
 
             await LoadDataCountsAsync();
         }
@@ -210,13 +303,72 @@ else
         try
         {
             await using var db = await DbFactory.CreateDbContextAsync();
-            _messageCount = await db.Messages.CountAsync();
-            _summaryCount = await db.Summaries.CountAsync();
-            _newsItemCount = await db.NewsItems.CountAsync();
+            var messageQuery = db.Messages.AsQueryable();
+            var summaryQuery = db.Summaries.AsQueryable();
+            var newsItemQuery = db.NewsItems.AsQueryable();
+
+            if (SelectedDeleteParentId.HasValue)
+            {
+                var parentId = SelectedDeleteParentId.Value;
+                messageQuery = messageQuery.Where(message => message.ParentId == parentId);
+                summaryQuery = summaryQuery.Where(summary => summary.ParentId == parentId);
+                newsItemQuery = newsItemQuery.Where(newsItem => newsItem.ParentId == parentId);
+            }
+
+            _messageCount = await messageQuery.CountAsync();
+            _summaryCount = await summaryQuery.CountAsync();
+            _newsItemCount = await newsItemQuery.CountAsync();
         }
         finally
         {
             _dataCountsLoading = false;
         }
     }
+
+    private async Task OnDeleteScopeChangedAsync()
+    {
+        _confirmClearData = false;
+        await LoadDataCountsAsync();
+    }
+
+    private async Task LoadParentOptionsAsync()
+    {
+        _parentOptionsLoading = true;
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            _parentOptions = await db.Parents
+                .Where(parent => parent.IsActive)
+                .OrderBy(parent => parent.Name)
+                .Select(parent => new DebugParentOption(parent.Id, parent.Name))
+                .ToListAsync();
+        }
+        finally
+        {
+            _parentOptionsLoading = false;
+        }
+    }
+
+    private async Task LoadDeleteParentOptionsAsync()
+    {
+        _deleteParentOptionsLoading = true;
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            _deleteParentOptions = await db.Parents
+                .OrderBy(parent => parent.Name)
+                .Select(parent => new DebugParentOption(
+                    parent.Id,
+                    parent.IsActive ? $"{parent.Name} (ID: {parent.Id})" : $"{parent.Name} (ID: {parent.Id}, inactive)"))
+                .ToListAsync();
+        }
+        finally
+        {
+            _deleteParentOptionsLoading = false;
+        }
+    }
+
+    private sealed record DebugParentOption(int Id, string DisplayName);
 }

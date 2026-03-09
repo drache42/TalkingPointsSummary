@@ -25,6 +25,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{F596720C-1
 		docs\F5-DEBUGGING.md = docs\F5-DEBUGGING.md
 		docs\n8n-flow.json = docs\n8n-flow.json
 		docs\TODO.md = docs\TODO.md
+		temp-v1-email.txt = temp-v1-email.txt
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TalkingPointsSummary.AppHost", "src\TalkingPointsSummary.AppHost\TalkingPointsSummary.AppHost.csproj", "{73C8CA79-E516-49A9-94A7-E56E6C5A7AD3}"

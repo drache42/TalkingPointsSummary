@@ -9,6 +9,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Serilog;
+using Serilog.Events;
 using TalkingPointsSummary.Commands;
 using TalkingPointsSummary.Configuration;
 using TalkingPointsSummary.Data;
@@ -19,6 +20,12 @@ namespace TalkingPointsSummary;
 
 internal sealed class Program
 {
+    private const string ConsoleOutputTemplate = "{Timestamp:HH:mm:ss} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}";
+    private const string FileOutputTemplate = "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}";
+    private const string EfCommandSourceContext = "Microsoft.EntityFrameworkCore.Database.Command";
+
+    private sealed record PipelineRunRequest(int? ParentId);
+
     public static async Task Main(string[] args)
     {
         var environmentName = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
@@ -29,6 +36,17 @@ internal sealed class Program
 
         Log.Logger = new LoggerConfiguration()
             .ReadFrom.Configuration(configuration)
+            .WriteTo.Logger(logger => logger
+                .Filter.ByExcluding(IsNoisyEfCommandLog)
+                .WriteTo.Console(
+                    restrictedToMinimumLevel: LogEventLevel.Information,
+                    outputTemplate: ConsoleOutputTemplate))
+            .WriteTo.File(
+                path: "logs/app-.log",
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 30,
+                restrictedToMinimumLevel: LogEventLevel.Debug,
+                outputTemplate: FileOutputTemplate)
             .CreateLogger();
 
         try
@@ -68,6 +86,21 @@ internal sealed class Program
             .AddJsonFile("appsettings.Local.json", optional: true)
             .AddEnvironmentVariables()
             .Build();
+    }
+
+    private static bool IsNoisyEfCommandLog(Serilog.Events.LogEvent logEvent)
+    {
+        if (logEvent.Level >= LogEventLevel.Warning)
+        {
+            return false;
+        }
+
+        if (!logEvent.Properties.TryGetValue("SourceContext", out var sourceContext))
+        {
+            return false;
+        }
+
+        return string.Equals(sourceContext.ToString().Trim('"'), EfCommandSourceContext, StringComparison.Ordinal);
     }
 
     private static AppSettings BuildAppSettings(IConfiguration configuration)
@@ -178,20 +211,29 @@ internal sealed class Program
         var app = builder.Build();
         await InitializeApplicationAsync(app.Services);
 
-        app.MapPost("/debug/pipeline/run-now", async (WeeklyPipelineService pipeline) =>
+        app.MapPost("/debug/pipeline/run-now", async (PipelineRunRequest? request, WeeklyPipelineService pipeline) =>
         {
-            var result = await pipeline.TryRunFullPipelineAsync("admin-debug", CancellationToken.None);
+            var result = await pipeline.TryRunFullPipelineAsync("admin-debug", request?.ParentId, CancellationToken.None);
             return result switch
             {
                 PipelineRunStatus.Completed => Results.Ok(new
                 {
                     status = "completed",
-                    message = "Pipeline run complete."
+                    message = request?.ParentId is int parentId
+                        ? $"Pipeline run complete for parent {parentId}."
+                        : "Pipeline run complete for all active parents."
                 }),
                 PipelineRunStatus.AlreadyRunning => Results.Conflict(new
                 {
                     status = "already-running",
                     message = "A pipeline run is already in progress."
+                }),
+                PipelineRunStatus.ParentNotFound => Results.NotFound(new
+                {
+                    status = "parent-not-found",
+                    message = request?.ParentId is int parentId
+                        ? $"Active parent {parentId} was not found."
+                        : "No active parent was found."
                 }),
                 _ => Results.Problem("Unexpected pipeline run status.")
             };

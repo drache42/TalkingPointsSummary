@@ -109,7 +109,7 @@ namespace TalkingPointsSummary.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ExternalMessageId")
+                    b.HasIndex("ParentId", "ExternalMessageId")
                         .IsUnique();
 
                     b.HasIndex("ParentId", "ProcessedAt");

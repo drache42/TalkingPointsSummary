@@ -45,7 +45,7 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.ExternalMessageId).IsRequired().HasMaxLength(100);
-            entity.HasIndex(e => e.ExternalMessageId).IsUnique();
+            entity.HasIndex(e => new { e.ParentId, e.ExternalMessageId }).IsUnique();
             entity.Property(e => e.ContactMessageId).HasMaxLength(100);
             entity.Property(e => e.StudentName).HasMaxLength(200);
             entity.Property(e => e.FromName).HasMaxLength(200);
