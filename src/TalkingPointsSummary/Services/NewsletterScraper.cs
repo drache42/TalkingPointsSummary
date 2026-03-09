@@ -38,7 +38,7 @@ public class NewsletterScraper
         {
             url,
             elements = new[] { new { selector = "body" } },
-            gotoOptions = new { waitUntil = "networkidle0", timeout = 60000 }
+            gotoOptions = new { waitUntil = "networkidle2", timeout = 60000 }
         };
 
         try

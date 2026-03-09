@@ -55,7 +55,8 @@ services.AddLogging(builder => builder.ClearProviders().AddSerilog(Log.Logger));
 
 // Database
 services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(appSettings.ConnectionString));
+    options.UseNpgsql(appSettings.ConnectionString,
+        npgsql => npgsql.MigrationsAssembly(typeof(Program).Assembly.GetName().Name ?? "TalkingPointsSummary")));
 
 // HTTP clients
 services.AddHttpClient<TalkingPointsApiClient>();
@@ -73,50 +74,81 @@ services.AddScoped<StartupValidator>();
 
 var serviceProvider = services.BuildServiceProvider();
 
-// --- Apply database migrations on startup ---
-using (var scope = serviceProvider.CreateScope())
+// --- Apply database migrations on startup (retry for transient Aspire startup timing) ---
 {
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    await db.Database.MigrateAsync();
+    const int maxAttempts = 10;
+    const int delayMs = 3000;
+    for (int attempt = 1; attempt <= maxAttempts; attempt++)
+    {
+        try
+        {
+            using var scope = serviceProvider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.Database.MigrateAsync();
+
+            // Verify schema is fully applied — guards against a corrupted migration history
+            // (e.g. __EFMigrationsHistory written but tables never created due to a mid-flight
+            // container kill). GetPendingMigrationsAsync() compares history against known
+            // migrations and throws if any are still outstanding.
+            var pending = (await db.Database.GetPendingMigrationsAsync()).ToList();
+            if (pending.Count > 0)
+                throw new InvalidOperationException(
+                    $"Schema verification failed: {pending.Count} migration(s) still pending after apply: {string.Join(", ", pending)}");
+
+            break;
+        }
+        catch (Exception ex) when (attempt < maxAttempts)
+        {
+            Log.Warning(ex, "Database migration attempt {Attempt}/{Max} failed, retrying in {Delay}ms",
+                attempt, maxAttempts, delayMs);
+            await Task.Delay(delayMs);
+        }
+        catch (Exception ex)
+        {
+            Log.Fatal(ex, "Database migration failed after {MaxAttempts} attempts. Aborting startup.", maxAttempts);
+            throw;
+        }
+    }
 }
 
 var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
 
+// --- Run startup validation ---
+// MigrateAsync() above already guarantees the database is ready before we reach here,
+// so no retry loop is needed — if the DB check fails at this point it is a real error.
+{
+    using var validationScope = serviceProvider.CreateScope();
+    var validator = validationScope.ServiceProvider.GetRequiredService<StartupValidator>();
+    var validationResults = await validator.RunAllChecksAsync();
+
+    foreach (var result in validationResults)
+    {
+        var level = result.Status switch
+        {
+            CheckStatus.Pass => Microsoft.Extensions.Logging.LogLevel.Information,
+            CheckStatus.Warn => Microsoft.Extensions.Logging.LogLevel.Warning,
+            _ => Microsoft.Extensions.Logging.LogLevel.Error
+        };
+        logger.Log(level, "[{Status}] {Name}: {Detail}", result.Status, result.Name, result.Detail);
+    }
+
+    var failCount = validationResults.Count(r => r.Status == CheckStatus.Fail);
+    if (failCount > 0)
+    {
+        logger.LogCritical("{FailCount} startup check(s) failed. Aborting.", failCount);
+        Environment.Exit(1);
+    }
+}
+
 // --- Route: CLI mode or Worker mode ---
 if (args.Length > 0)
 {
-    // CLI mode: parse commands and exit
     var rootCommand = CommandHandler.BuildRootCommand(serviceProvider);
     await rootCommand.Parse(args).InvokeAsync();
 }
 else
 {
-    // Worker mode: run as long-lived background service
     logger.LogInformation("Starting Talking Points Summary worker service");
-
-    using (var validationScope = serviceProvider.CreateScope())
-    {
-        var validator = validationScope.ServiceProvider.GetRequiredService<StartupValidator>();
-        var results = await validator.RunAllChecksAsync();
-
-        foreach (var result in results)
-        {
-            var level = result.Status switch
-            {
-                CheckStatus.Pass => Microsoft.Extensions.Logging.LogLevel.Information,
-                CheckStatus.Warn => Microsoft.Extensions.Logging.LogLevel.Warning,
-                _ => Microsoft.Extensions.Logging.LogLevel.Error
-            };
-            logger.Log(level, "[{Status}] {Name}: {Detail}", result.Status, result.Name, result.Detail);
-        }
-
-        var failCount = results.Count(r => r.Status == CheckStatus.Fail);
-        if (failCount > 0)
-        {
-            logger.LogCritical("{FailCount} startup check(s) failed. Aborting worker.", failCount);
-            Environment.Exit(1);
-        }
-    }
 
     var pipeline = serviceProvider.GetRequiredService<WeeklyPipelineService>();
     await pipeline.StartAsync(CancellationToken.None);

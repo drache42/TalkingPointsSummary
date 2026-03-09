@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TalkingPointsSummary\TalkingPointsSummary.csproj" />
+    <ProjectReference Include="..\TalkingPointsSummary.Admin\TalkingPointsSummary.Admin.csproj" />
   </ItemGroup>
 
 </Project>

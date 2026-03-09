@@ -1,0 +1,58 @@
+@page "/"
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<PageTitle>Dashboard — TalkingPoints Admin</PageTitle>
+
+<h1 class="mb-4">Dashboard</h1>
+
+@if (_loading)
+{
+    <p class="text-muted">Loading…</p>
+}
+else
+{
+    <div class="row g-3 mb-4">
+        <div class="col-sm-4">
+            <div class="card text-bg-primary">
+                <div class="card-body">
+                    <h6 class="card-title">Total Parents</h6>
+                    <p class="card-text display-6 mb-0">@_parentCount</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-sm-4">
+            <div class="card text-bg-success">
+                <div class="card-body">
+                    <h6 class="card-title">Active Parents</h6>
+                    <p class="card-text display-6 mb-0">@_activeCount</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-sm-4">
+            <div class="card text-bg-info">
+                <div class="card-body">
+                    <h6 class="card-title">Children</h6>
+                    <p class="card-text display-6 mb-0">@_childCount</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <a href="/parents" class="btn btn-primary">Manage Parents</a>
+}
+
+@code {
+    private bool _loading = true;
+    private int _parentCount;
+    private int _activeCount;
+    private int _childCount;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _parentCount = await db.Parents.CountAsync();
+        _activeCount = await db.Parents.CountAsync(p => p.IsActive);
+        _childCount = await db.Children.CountAsync();
+        _loading = false;
+    }
+}

@@ -1,0 +1,123 @@
+@page "/parents/{Id:int}"
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<PageTitle>@(_parent?.Name ?? "Parent") — TalkingPoints Admin</PageTitle>
+
+@if (_parent is null)
+{
+    <p class="text-muted">Loading…</p>
+}
+else
+{
+    <nav aria-label="breadcrumb" class="mb-1">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="/parents">Parents</a></li>
+            <li class="breadcrumb-item active">@_parent.Name</li>
+        </ol>
+    </nav>
+
+    <div class="d-flex justify-content-between align-items-start mb-3">
+        <h1>@_parent.Name</h1>
+        <div class="d-flex gap-2">
+            <a href="/parents/@_parent.Id/edit" class="btn btn-outline-primary">Edit</a>
+            <a href="/parents/@_parent.Id/delete" class="btn btn-outline-danger">Delete</a>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-md-7">
+            <dl class="row">
+                <dt class="col-sm-4">Email Recipients</dt>
+                <dd class="col-sm-8">@_parent.EmailRecipients</dd>
+                <dt class="col-sm-4">Contact ID</dt>
+                <dd class="col-sm-8"><code>@_parent.TalkingPointsContactId</code></dd>
+                <dt class="col-sm-4">Status</dt>
+                <dd class="col-sm-8">
+                    @if (_parent.IsActive)
+                    {
+                        <span class="badge text-bg-success">Active</span>
+                    }
+                    else
+                    {
+                        <span class="badge text-bg-secondary">Inactive</span>
+                    }
+                </dd>
+                <dt class="col-sm-4">Created</dt>
+                <dd class="col-sm-8">@_parent.CreatedAt.ToString("yyyy-MM-dd HH:mm") UTC</dd>
+            </dl>
+        </div>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h2>Children</h2>
+        <a href="/parents/@_parent.Id/children/create" class="btn btn-sm btn-primary">Add Child</a>
+    </div>
+
+    @if (_parent.Children.Count == 0)
+    {
+        <div class="alert alert-info">
+            No children yet. <a href="/parents/@_parent.Id/children/create">Add one.</a>
+        </div>
+    }
+    else
+    {
+        <table class="table table-sm table-striped align-middle">
+            <thead class="table-dark">
+                <tr>
+                    <th>Emoji</th>
+                    <th>Name</th>
+                    <th>School</th>
+                    <th>Grade</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var child in _parent.Children.OrderBy(c => c.Name))
+                {
+                    <tr>
+                        <td>@child.Emoji</td>
+                        <td>@child.Name</td>
+                        <td>@child.School</td>
+                        <td>@GradeLabel(CurrentGrade(child))</td>
+                        <td class="text-end">
+                            <a href="/parents/@_parent.Id/children/@child.Id/edit" class="btn btn-sm btn-outline-primary">Edit</a>
+                            <a href="/parents/@_parent.Id/children/@child.Id/delete" class="btn btn-sm btn-outline-danger">Delete</a>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private Parent? _parent;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _parent = await db.Parents
+            .Include(p => p.Children)
+            .FirstOrDefaultAsync(p => p.Id == Id);
+    }
+
+    private static int CurrentGrade(Child child)
+    {
+        var now = DateTime.UtcNow;
+        var currentSchoolYear = now.Month >= 9 ? now.Year : now.Year - 1;
+        return child.StartingGrade + Math.Max(0, currentSchoolYear - child.StartingYear);
+    }
+
+    private static string GradeLabel(int grade) => grade switch
+    {
+        0 => "Kindergarten",
+        1 => "1st Grade",
+        2 => "2nd Grade",
+        3 => "3rd Grade",
+        _ when grade >= 4 && grade <= 12 => $"{grade}th Grade",
+        _ => $"Grade {grade}"
+    };
+}

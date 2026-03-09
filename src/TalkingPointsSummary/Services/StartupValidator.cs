@@ -93,8 +93,8 @@ public class StartupValidator
             return pending.Count == 0
                 ? new ValidationCheckResult("Database connection", CheckStatus.Pass,
                     $"Connected; {applied.Count} migration(s) applied, schema is up to date")
-                : new ValidationCheckResult("Database connection", CheckStatus.Warn,
-                    $"Connected but {pending.Count} pending migration(s): {string.Join(", ", pending)}");
+                : new ValidationCheckResult("Database connection", CheckStatus.Fail,
+                    $"Connected but {pending.Count} pending migration(s): {string.Join(", ", pending)} — run MigrateAsync or restart the app");
         }
         catch (Exception ex)
         {

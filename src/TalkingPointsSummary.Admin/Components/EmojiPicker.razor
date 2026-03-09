@@ -1,0 +1,23 @@
+<div class="emoji-picker">
+    @foreach (var emoji in _emojis)
+    {
+        <button type="button"
+                class="emoji-btn @(Value == emoji ? "selected" : "")"
+                @onclick="() => ValueChanged.InvokeAsync(emoji)"
+                title="@emoji">@emoji</button>
+    }
+</div>
+
+@code {
+    [Parameter] public string Value { get; set; } = "📚";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+
+    private static readonly string[] _emojis =
+    [
+        "📚", "🎓", "✏️", "📖", "📝", "🖊️",
+        "🎨", "🎭", "🎵", "🎤", "🎯", "🏆",
+        "⚽", "🏀", "🏊", "🚴", "⭐", "🌟",
+        "🦋", "🌈", "🌸", "🚀", "💡", "🔬",
+        "🦁", "🐶", "🐱", "🦊", "🐸", "🐼",
+    ];
+}

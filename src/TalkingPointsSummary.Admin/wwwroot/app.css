@@ -1,0 +1,147 @@
+/* sidebar active link */
+.sidebar .nav-link.active {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+.sidebar .nav-link:hover:not(.active) {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* EmailListEditor component */
+.email-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.email-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #e7f1ff;
+    border: 1px solid #b6d4fe;
+    border-radius: 20px;
+    padding: 3px 8px 3px 12px;
+    font-size: 0.875rem;
+    color: #0a58ca;
+}
+
+.email-chip-remove {
+    background: none;
+    border: none;
+    color: #6ea8fe;
+    font-size: 13px;
+    padding: 0;
+    cursor: pointer;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+}
+
+.email-chip-remove:hover {
+    color: #0a58ca;
+}
+
+/* InfoTooltip component */
+.info-tip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.info-tip-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 17px;
+    height: 17px;
+    border-radius: 50%;
+    background: #6c757d;
+    color: #fff;
+    font-size: 10px;
+    font-weight: bold;
+    font-style: normal;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.info-tip-btn:hover,
+.info-tip-btn:focus {
+    background: #495057;
+    outline: 2px solid #86b7fe;
+}
+
+.info-tip-popup {
+    position: absolute;
+    left: 24px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 1000;
+    background: #212529;
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-weight: normal;
+    line-height: 1.5;
+    width: 300px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    white-space: normal;
+}
+
+.info-tip-close {
+    float: right;
+    background: none;
+    border: none;
+    color: #adb5bd;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+    margin-left: 10px;
+    cursor: pointer;
+}
+
+.info-tip-close:hover {
+    color: #fff;
+}
+
+/* EmojiPicker component */
+.emoji-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-width: 300px;
+}
+
+.emoji-btn {
+    width: 40px;
+    height: 40px;
+    border: 2px solid #dee2e6;
+    border-radius: 8px;
+    background: #fff;
+    font-size: 20px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    line-height: 1;
+    transition: border-color 0.1s, background 0.1s;
+}
+
+.emoji-btn:hover {
+    border-color: #adb5bd;
+    background: #f8f9fa;
+}
+
+.emoji-btn:focus {
+    outline: 2px solid #86b7fe;
+    outline-offset: 1px;
+}
+
+.emoji-btn.selected {
+    border-color: #0d6efd;
+    background: #e7f1ff;
+}

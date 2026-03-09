@@ -1,0 +1,14 @@
+@inherits LayoutComponentBase
+
+<div class="d-flex" style="min-height: 100vh;">
+    <div class="d-flex flex-column flex-shrink-0 p-3 bg-dark text-white" style="width: 220px;">
+        <a href="/" class="d-flex align-items-center mb-3 text-white text-decoration-none">
+            <span class="fs-6 fw-bold">TalkingPoints Admin</span>
+        </a>
+        <hr class="border-secondary" />
+        <NavMenu />
+    </div>
+    <div class="flex-grow-1 p-4 bg-light">
+        @Body
+    </div>
+</div>

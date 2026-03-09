@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 var builder = DistributedApplication.CreateBuilder(args);
 
 IResourceBuilder<ProjectResource> worker;
+IResourceBuilder<ProjectResource> admin;
 
 if (builder.Configuration.GetValue<bool>("ManagePostgres", true))
 {
@@ -13,11 +14,18 @@ if (builder.Configuration.GetValue<bool>("ManagePostgres", true))
 
     var postgres = builder.AddPostgres("postgres", password: postgresPassword)
         .WithImage("postgres", "15-alpine")
-        .WithDataVolume("talkingpoints-postgres-data");
+        .WithHostPort(5432)
+        .WithDataVolume("talkingpoints-postgres-data")
+        .WithPgAdmin();
 
     var db = postgres.AddDatabase("talkingpoints");
 
     worker = builder.AddProject<Projects.TalkingPointsSummary>("worker")
+        .WithReference(db)
+        .WaitFor(db)
+        .WithEnvironment("CONNECTION_STRING", db);
+
+    admin = builder.AddProject<Projects.TalkingPointsSummary_Admin>("admin")
         .WithReference(db)
         .WaitFor(db)
         .WithEnvironment("CONNECTION_STRING", db);
@@ -29,6 +37,9 @@ else
     var postgres = builder.AddConnectionString("postgres");
 
     worker = builder.AddProject<Projects.TalkingPointsSummary>("worker")
+        .WithEnvironment("CONNECTION_STRING", postgres);
+
+    admin = builder.AddProject<Projects.TalkingPointsSummary_Admin>("admin")
         .WithEnvironment("CONNECTION_STRING", postgres);
 }
 

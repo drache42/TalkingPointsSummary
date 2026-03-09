@@ -1,0 +1,146 @@
+@page "/parents/create"
+@page "/parents/{Id:int}/edit"
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject NavigationManager Nav
+
+<PageTitle>@(Id.HasValue ? "Edit Parent" : "Add Parent") — TalkingPoints Admin</PageTitle>
+
+<nav aria-label="breadcrumb" class="mb-1">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/parents">Parents</a></li>
+        @if (Id.HasValue)
+        {
+            <li class="breadcrumb-item"><a href="/parents/@Id">@_originalName</a></li>
+        }
+        <li class="breadcrumb-item active">@(Id.HasValue ? "Edit" : "Add Parent")</li>
+    </ol>
+</nav>
+
+<h1 class="mb-3">@(Id.HasValue ? "Edit Parent" : "Add Parent")</h1>
+
+@if (_notFound)
+{
+    <div class="alert alert-danger">Parent not found.</div>
+}
+else
+{
+    <div class="row">
+        <div class="col-md-6">
+            <EditForm Model="_model" OnValidSubmit="SaveAsync" FormName="parent-form">
+                <DataAnnotationsValidator />
+                <ValidationSummary class="alert alert-danger" />
+
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Name</label>
+                    <InputText @bind-Value="_model.Name" class="form-control" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold d-flex align-items-center gap-2">
+                        TalkingPoints Token
+                        <InfoTooltip Text="Open Chrome DevTools (F12) → Network tab → visit app.talkingpts.org → click any API request → Request Headers → copy the x-token value" />
+                    </label>
+                    <InputText @bind-Value="_model.TalkingPointsToken" class="form-control" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold d-flex align-items-center gap-2">
+                        TalkingPoints Contact ID
+                        <InfoTooltip Text="Open Chrome DevTools (F12) → Network tab → visit app.talkingpts.org → click any API request → Request Headers → copy the x-contactid value" />
+                    </label>
+                    <InputText @bind-Value="_model.TalkingPointsContactId" class="form-control" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Email Recipients</label>
+                    <EmailListEditor @bind-Value="_model.EmailRecipients" />
+                </div>
+                <div class="mb-4 form-check">
+                    <InputCheckbox @bind-Value="_model.IsActive" class="form-check-input" id="isActive" />
+                    <label class="form-check-label" for="isActive">Active</label>
+                </div>
+
+                <button type="submit" class="btn btn-primary" disabled="@_saving">
+                    @(_saving ? "Saving…" : "Save")
+                </button>
+                <a href="/parents" class="btn btn-secondary ms-2">Cancel</a>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    private ParentInputModel _model = new();
+    private string _originalName = string.Empty;
+    private bool _saving;
+    private bool _notFound;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Id.HasValue) return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var parent = await db.Parents.FindAsync(Id.Value);
+        if (parent is null) { _notFound = true; return; }
+
+        _originalName = parent.Name;
+        _model = new ParentInputModel
+        {
+            Name = parent.Name,
+            TalkingPointsToken = parent.TalkingPointsToken,
+            TalkingPointsContactId = parent.TalkingPointsContactId,
+            EmailRecipients = parent.EmailRecipients,
+            IsActive = parent.IsActive,
+        };
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        if (Id.HasValue)
+        {
+            var parent = await db.Parents.FindAsync(Id.Value);
+            if (parent is null) { _notFound = true; _saving = false; return; }
+
+            parent.Name = _model.Name;
+            parent.TalkingPointsToken = _model.TalkingPointsToken;
+            parent.TalkingPointsContactId = _model.TalkingPointsContactId;
+            parent.EmailRecipients = _model.EmailRecipients;
+            parent.IsActive = _model.IsActive;
+        }
+        else
+        {
+            db.Parents.Add(new Parent
+            {
+                Name = _model.Name,
+                TalkingPointsToken = _model.TalkingPointsToken,
+                TalkingPointsContactId = _model.TalkingPointsContactId,
+                EmailRecipients = _model.EmailRecipients,
+                IsActive = _model.IsActive,
+                CreatedAt = DateTime.UtcNow,
+            });
+        }
+
+        await db.SaveChangesAsync();
+        Nav.NavigateTo("/parents");
+    }
+
+    private sealed class ParentInputModel
+    {
+        [Required, MaxLength(200)]
+        public string Name { get; set; } = string.Empty;
+
+        [Required]
+        public string TalkingPointsToken { get; set; } = string.Empty;
+
+        [Required, MaxLength(100)]
+        public string TalkingPointsContactId { get; set; } = string.Empty;
+
+        [Required]
+        public string EmailRecipients { get; set; } = string.Empty;
+
+        public bool IsActive { get; set; } = true;
+    }
+}

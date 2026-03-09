@@ -82,7 +82,7 @@ public class PipelineOrchestrator
             // Step 7: Send email
             await _emailSender.SendAsync(
                 parent.EmailRecipients,
-                "Talking Points Summary",
+                "Talking Points Summary V2",
                 html,
                 ct);
 
@@ -140,6 +140,30 @@ public class PipelineOrchestrator
                     _db.NewsItems.Add(newsItem);
                     await _db.SaveChangesAsync(ct);
                     _logger.LogInformation("Saved newsletter news item for message {MessageId}", message.ExternalMessageId);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Scraper returned empty for URL {NewsletterUrl} (message {MessageId}); saving message text as fallback",
+                        result.NewsletterUrl, message.ExternalMessageId);
+
+                    var fallbackItem = new NewsItem
+                    {
+                        ParentId = parent.Id,
+                        SourceMessageId = message.ExternalMessageId,
+                        SourceType = SourceType.MessageText,
+                        NewsletterUrl = result.NewsletterUrl,
+                        NewsContent = message.MessageText,
+                        AiSummary = result.Summary,
+                        FromName = message.FromName,
+                        StudentName = message.StudentName,
+                        SentAt = message.SentAt,
+                        AnalyzedAt = DateTime.UtcNow,
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    _db.NewsItems.Add(fallbackItem);
+                    await _db.SaveChangesAsync(ct);
+                    _logger.LogInformation("Saved fallback news item for message {MessageId}", message.ExternalMessageId);
                 }
             }
 

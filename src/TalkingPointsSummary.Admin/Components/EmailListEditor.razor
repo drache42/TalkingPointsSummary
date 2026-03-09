@@ -1,0 +1,98 @@
+<div class="email-list-editor">
+    @if (_emails.Count > 0)
+    {
+        <div class="email-chips mb-2">
+            @foreach (var email in _emails)
+            {
+                <span class="email-chip">
+                    @email
+                    <button type="button"
+                            class="email-chip-remove"
+                            @onclick="() => Remove(email)"
+                            aria-label="Remove @email">&#x2715;</button>
+                </span>
+            }
+        </div>
+    }
+
+    <div class="input-group">
+        <input type="email"
+               class="form-control @(_error is not null ? "is-invalid" : "")"
+               placeholder="name@example.com"
+               @bind="_inputValue"
+               @bind:event="oninput" />
+        <button type="button" class="btn btn-outline-secondary" @onclick="AddAsync">Add</button>
+        @if (_error is not null)
+        {
+            <div class="invalid-feedback d-block">@_error</div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Value { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+
+    private List<string> _emails = [];
+    private string _inputValue = string.Empty;
+    private string? _error;
+
+    protected override void OnParametersSet()
+    {
+        var incoming = Value
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
+        if (!incoming.SequenceEqual(_emails))
+            _emails = incoming;
+    }
+
+    private async Task AddAsync()
+    {
+        _error = null;
+
+        // Support pasting several addresses at once (semicolon or comma separated)
+        var candidates = _inputValue
+            .Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        var invalid = candidates.FirstOrDefault(e => !IsValidEmail(e));
+        if (invalid is not null)
+        {
+            _error = $"'{invalid}' is not a valid email address.";
+            return;
+        }
+
+        var added = false;
+        foreach (var email in candidates)
+        {
+            if (!_emails.Contains(email, StringComparer.OrdinalIgnoreCase))
+            {
+                _emails.Add(email);
+                added = true;
+            }
+        }
+
+        if (!added)
+        {
+            _error = candidates.Length == 1
+                ? "This address is already in the list."
+                : "All of those addresses are already in the list.";
+            return;
+        }
+
+        _inputValue = string.Empty;
+        await ValueChanged.InvokeAsync(string.Join(";", _emails));
+    }
+
+    private async Task Remove(string email)
+    {
+        _emails.Remove(email);
+        await ValueChanged.InvokeAsync(string.Join(";", _emails));
+    }
+
+    private static bool IsValidEmail(string email)
+    {
+        var at = email.IndexOf('@');
+        return at > 0 && at < email.Length - 1 && email[(at + 1)..].Contains('.');
+    }
+}

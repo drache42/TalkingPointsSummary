@@ -1,0 +1,20 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+# Copy csproj files and restore
+COPY src/TalkingPointsSummary.Core/TalkingPointsSummary.Core.csproj src/TalkingPointsSummary.Core/
+COPY src/TalkingPointsSummary.Admin/TalkingPointsSummary.Admin.csproj src/TalkingPointsSummary.Admin/
+RUN dotnet restore src/TalkingPointsSummary.Admin/TalkingPointsSummary.Admin.csproj
+
+# Copy everything and publish
+COPY . .
+WORKDIR /src/src/TalkingPointsSummary.Admin
+RUN dotnet publish -c Release -o /app/publish --no-restore
+
+# Runtime image
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+WORKDIR /app
+COPY --from=build /app/publish .
+
+EXPOSE 8080
+ENTRYPOINT ["dotnet", "TalkingPointsSummary.Admin.dll"]

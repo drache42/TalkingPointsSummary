@@ -1,0 +1,76 @@
+@page "/parents"
+@rendermode InteractiveServer
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<PageTitle>Parents — TalkingPoints Admin</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1>Parents</h1>
+    <a href="/parents/create" class="btn btn-primary">Add Parent</a>
+</div>
+
+@if (_loading)
+{
+    <p class="text-muted">Loading…</p>
+}
+else if (_parents.Count == 0)
+{
+    <div class="alert alert-info">
+        No parents yet. <a href="/parents/create">Add the first one.</a>
+    </div>
+}
+else
+{
+    <table class="table table-striped table-hover align-middle">
+        <thead class="table-dark">
+            <tr>
+                <th>Name</th>
+                <th>Email Recipients</th>
+                <th>Children</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var parent in _parents)
+            {
+                <tr>
+                    <td><a href="/parents/@parent.Id">@parent.Name</a></td>
+                    <td><small class="text-muted">@parent.EmailRecipients</small></td>
+                    <td>@parent.Children.Count</td>
+                    <td>
+                        @if (parent.IsActive)
+                        {
+                            <span class="badge text-bg-success">Active</span>
+                        }
+                        else
+                        {
+                            <span class="badge text-bg-secondary">Inactive</span>
+                        }
+                    </td>
+                    <td><small>@parent.CreatedAt.ToString("yyyy-MM-dd")</small></td>
+                    <td class="text-end">
+                        <a href="/parents/@parent.Id/edit" class="btn btn-sm btn-outline-primary">Edit</a>
+                        <a href="/parents/@parent.Id/delete" class="btn btn-sm btn-outline-danger">Delete</a>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private bool _loading = true;
+    private List<Parent> _parents = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _parents = await db.Parents
+            .Include(p => p.Children)
+            .OrderBy(p => p.Name)
+            .ToListAsync();
+        _loading = false;
+    }
+}

@@ -17,7 +17,8 @@ public class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbContext>
             ?? "Host=localhost;Database=talkingpoints;Username=postgres;Password=postgres";
 
         var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseNpgsql(connectionString)
+            .UseNpgsql(connectionString,
+                npgsql => npgsql.MigrationsAssembly("TalkingPointsSummary"))
             .Options;
 
         return new AppDbContext(options);

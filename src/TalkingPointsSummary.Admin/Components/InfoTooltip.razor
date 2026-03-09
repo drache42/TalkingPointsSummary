@@ -1,0 +1,20 @@
+<span class="info-tip">
+    <button type="button"
+            class="info-tip-btn"
+            @onclick="() => _visible = !_visible"
+            aria-label="Show help"
+            aria-expanded="@_visible">i</button>
+    @if (_visible)
+    {
+        <span class="info-tip-popup" role="tooltip">
+            @Text
+            <button type="button" class="info-tip-close" @onclick="() => _visible = false" aria-label="Close">&#x2715;</button>
+        </span>
+    }
+</span>
+
+@code {
+    [Parameter, EditorRequired] public string Text { get; set; } = string.Empty;
+
+    private bool _visible;
+}
