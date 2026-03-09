@@ -45,4 +45,20 @@ if (builder.Configuration.GetValue<bool>("ManageBrowserless", true))
         .WithEnvironment("BROWSERLESS_URL", browserless.GetEndpoint("http"));
 }
 
+if (builder.Configuration.GetValue<bool>("ManageMailpit", true))
+{
+    // Aspire manages a local Mailpit container — catches all outgoing emails for dev inspection
+    // Browse captured emails at http://localhost:8025
+    var mailpit = builder.AddContainer("mailpit", "axllent/mailpit")
+        .WithHttpEndpoint(port: 8025, targetPort: 8025, name: "ui")
+        .WithEndpoint(port: 1025, targetPort: 1025, name: "smtp", scheme: "tcp");
+
+    var smtpEndpoint = mailpit.GetEndpoint("smtp");
+
+    worker
+        .WaitFor(mailpit)
+        .WithEnvironment("SMTP_HOST", smtpEndpoint.Property(EndpointProperty.Host))
+        .WithEnvironment("SMTP_PORT", smtpEndpoint.Property(EndpointProperty.Port));
+}
+
 builder.Build().Run();

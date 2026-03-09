@@ -45,7 +45,7 @@ public class EmailSender
         _logger.LogInformation("Sending email to {Recipients} with subject '{Subject}'", recipients, subject);
 
         using var client = new SmtpClient();
-        await client.ConnectAsync(_settings.Smtp.Host, _settings.Smtp.Port, SecureSocketOptions.StartTls, ct);
+        await client.ConnectAsync(_settings.Smtp.Host, _settings.Smtp.Port, SecureSocketOptions.Auto, ct);
         await client.AuthenticateAsync(_settings.Smtp.Username, _settings.Smtp.Password, ct);
         await client.SendAsync(message, ct);
         await client.DisconnectAsync(true, ct);
