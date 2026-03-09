@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using TalkingPointsSummary.Admin;
+using TalkingPointsSummary.Admin.Services;
 using TalkingPointsSummary.Data;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -12,6 +13,15 @@ builder.Services.AddRazorComponents()
 
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
     options.UseNpgsql(connectionString));
+
+builder.Services.AddHttpClient<PipelineDebugClient>(client =>
+{
+    var workerDebugBaseUrl = builder.Configuration["WorkerDebugBaseUrl"];
+    if (Uri.TryCreate(workerDebugBaseUrl, UriKind.Absolute, out var baseAddress))
+    {
+        client.BaseAddress = baseAddress;
+    }
+});
 
 var app = builder.Build();
 

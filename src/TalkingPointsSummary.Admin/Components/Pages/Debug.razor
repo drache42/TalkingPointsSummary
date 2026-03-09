@@ -1,0 +1,91 @@
+@page "/debug"
+@rendermode InteractiveServer
+@inject IWebHostEnvironment Environment
+@inject PipelineDebugClient PipelineDebugClient
+
+<PageTitle>Debug - TalkingPoints Admin</PageTitle>
+
+<h1 class="mb-3">Debug</h1>
+
+@if (!Environment.IsDevelopment())
+{
+    <div class="alert alert-warning" role="alert">
+        Debug tools are only available in Development.
+    </div>
+}
+else
+{
+    <div class="card shadow-sm mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Run Pipeline Now</h5>
+            <p class="card-text text-muted mb-3">
+                Trigger the main worker pipeline immediately using the same execution path as the manual worker command.
+            </p>
+
+            @if (!PipelineDebugClient.IsConfigured)
+            {
+                <div class="alert alert-warning" role="alert">
+                    Worker trigger URL is not configured for this environment.
+                </div>
+            }
+            else
+            {
+                <p class="small text-muted mb-3">Target: @PipelineDebugClient.BaseUrl</p>
+            }
+
+            <button class="btn btn-danger"
+                    @onclick="RunNowAsync"
+                    disabled="@(_isRunning || !PipelineDebugClient.IsConfigured)">
+                @(_isRunning ? "Running..." : "Run Now")
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_statusMessage))
+    {
+        <div class="alert @StatusAlertClass" role="alert">
+            @_statusMessage
+        </div>
+    }
+}
+
+@code {
+    private bool _isRunning;
+    private bool? _lastRunSucceeded;
+    private bool _lastRunWasConflict;
+    private string? _statusMessage;
+
+    private string StatusAlertClass => _isRunning
+        ? "alert-info"
+        : _lastRunSucceeded == true
+            ? "alert-success"
+            : _lastRunWasConflict
+                ? "alert-warning"
+                : "alert-danger";
+
+    private async Task RunNowAsync()
+    {
+        _isRunning = true;
+        _lastRunSucceeded = null;
+        _lastRunWasConflict = false;
+        _statusMessage = "Running pipeline...";
+
+        try
+        {
+            var result = await PipelineDebugClient.RunNowAsync();
+            _lastRunSucceeded = result.Success;
+            _lastRunWasConflict = result.AlreadyRunning;
+            _statusMessage = result.Message;
+        }
+        catch (Exception ex)
+        {
+            _lastRunSucceeded = false;
+            _lastRunWasConflict = false;
+            _statusMessage = $"Pipeline trigger failed: {ex.Message}";
+        }
+        finally
+        {
+            _isRunning = false;
+        }
+    }
+}

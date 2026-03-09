@@ -242,7 +242,14 @@ public static class CommandHandler
             var pipeline = scope.ServiceProvider.GetRequiredService<WeeklyPipelineService>();
 
             Console.WriteLine("Starting manual pipeline run...");
-            await pipeline.RunFullPipelineAsync();
+            var result = await pipeline.TryRunFullPipelineAsync("manual-cli");
+            if (result == PipelineRunStatus.AlreadyRunning)
+            {
+                Console.WriteLine("A pipeline run is already in progress.");
+                Environment.ExitCode = 1;
+                return;
+            }
+
             Console.WriteLine("Pipeline run complete.");
         });
 

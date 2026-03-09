@@ -1,6 +1,12 @@
 using System.CommandLine;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Serilog;
 using TalkingPointsSummary.Commands;
@@ -9,177 +15,234 @@ using TalkingPointsSummary.Data;
 using TalkingPointsSummary.Pipeline;
 using TalkingPointsSummary.Services;
 
-// --- Build IConfiguration (appsettings.json + environment variables) ---
-var environment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production";
-var configuration = new ConfigurationBuilder()
-    .SetBasePath(Directory.GetCurrentDirectory())
-    .AddJsonFile("appsettings.json", optional: false)
-    .AddJsonFile($"appsettings.{environment}.json", optional: true)
-    .AddJsonFile("appsettings.Local.json", optional: true)
-    .AddEnvironmentVariables()
-    .Build();
+namespace TalkingPointsSummary;
 
-// --- Configure Serilog from appsettings ---
-Log.Logger = new LoggerConfiguration()
-    .ReadFrom.Configuration(configuration)
-    .CreateLogger();
-
-try
+internal sealed class Program
 {
-
-// --- Build configuration from environment variables ---
-var appSettings = new AppSettings
-{
-    ConnectionString = configuration["CONNECTION_STRING"]
-        ?? "Host=localhost;Database=talkingpoints;Username=postgres;Password=postgres",
-    AnthropicApiKey = configuration["ANTHROPIC_API_KEY"] ?? string.Empty,
-    BrowserlessUrl = configuration["BROWSERLESS_URL"] ?? "http://browserless:3000",
-    Smtp = new SmtpSettings
+    public static async Task Main(string[] args)
     {
-        Host = configuration["SMTP_HOST"] ?? "smtp.gmail.com",
-        Port = int.TryParse(configuration["SMTP_PORT"], out var port) ? port : 587,
-        Username = configuration["SMTP_USERNAME"] ?? string.Empty,
-        Password = configuration["SMTP_PASSWORD"] ?? string.Empty,
-        FromEmail = configuration["SMTP_FROM"] ?? string.Empty,
-    },
-    ScheduleDayOfWeek = int.TryParse(configuration["SCHEDULE_DAY"], out var day) ? day : 1,
-    ScheduleHour = int.TryParse(configuration["SCHEDULE_HOUR"], out var hour) ? hour : 8,
-};
+        var environmentName = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
+            ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
+            ?? Environments.Production;
 
-// --- Build DI container (shared between CLI and Worker modes) ---
-var services = new ServiceCollection();
+        var configuration = BuildConfiguration(environmentName);
 
-// Configuration
-services.AddSingleton(Options.Create(appSettings));
-services.AddLogging(builder => builder.ClearProviders().AddSerilog(Log.Logger));
+        Log.Logger = new LoggerConfiguration()
+            .ReadFrom.Configuration(configuration)
+            .CreateLogger();
 
-// Database
-services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(appSettings.ConnectionString,
-        npgsql => npgsql.MigrationsAssembly(typeof(Program).Assembly.GetName().Name ?? "TalkingPointsSummary")));
-
-// HTTP clients
-services.AddHttpClient<TalkingPointsApiClient>();
-services.AddHttpClient<MessageCategorizer>();
-services.AddHttpClient<NewsletterScraper>();
-services.AddHttpClient<SummaryGenerator>();
-
-// Services
-services.AddScoped<MessageDeduplicator>();
-services.AddSingleton<MarkdownConverter>();
-services.AddScoped<EmailSender>();
-services.AddScoped<PipelineOrchestrator>();
-services.AddSingleton<WeeklyPipelineService>();
-services.AddScoped<StartupValidator>();
-
-var serviceProvider = services.BuildServiceProvider();
-
-// --- Apply database migrations on startup (retry for transient Aspire startup timing) ---
-{
-    const int maxAttempts = 10;
-    const int delayMs = 3000;
-    for (int attempt = 1; attempt <= maxAttempts; attempt++)
-    {
         try
         {
-            using var scope = serviceProvider.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            await db.Database.MigrateAsync();
+            var appSettings = BuildAppSettings(configuration);
 
-            // Verify schema is fully applied — guards against a corrupted migration history
-            // (e.g. __EFMigrationsHistory written but tables never created due to a mid-flight
-            // container kill). GetPendingMigrationsAsync() compares history against known
-            // migrations and throws if any are still outstanding.
-            var pending = (await db.Database.GetPendingMigrationsAsync()).ToList();
-            if (pending.Count > 0)
-                throw new InvalidOperationException(
-                    $"Schema verification failed: {pending.Count} migration(s) still pending after apply: {string.Join(", ", pending)}");
-
-            break;
-        }
-        catch (Exception ex) when (attempt < maxAttempts)
-        {
-            Log.Warning(ex, "Database migration attempt {Attempt}/{Max} failed, retrying in {Delay}ms",
-                attempt, maxAttempts, delayMs);
-            await Task.Delay(delayMs);
+            if (args.Length > 0)
+            {
+                await RunCliAsync(args, appSettings);
+            }
+            else if (string.Equals(environmentName, Environments.Development, StringComparison.OrdinalIgnoreCase))
+            {
+                await RunDevelopmentWorkerAsync(args, environmentName, configuration, appSettings);
+            }
+            else
+            {
+                await RunWorkerAsync(configuration, appSettings);
+            }
         }
         catch (Exception ex)
         {
-            Log.Fatal(ex, "Database migration failed after {MaxAttempts} attempts. Aborting startup.", maxAttempts);
+            Log.Fatal(ex, "Application terminated unexpectedly");
             throw;
         }
-    }
-}
-
-var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
-
-// --- Run startup validation ---
-// MigrateAsync() above already guarantees the database is ready before we reach here,
-// so no retry loop is needed — if the DB check fails at this point it is a real error.
-{
-    using var validationScope = serviceProvider.CreateScope();
-    var validator = validationScope.ServiceProvider.GetRequiredService<StartupValidator>();
-    var validationResults = await validator.RunAllChecksAsync();
-
-    foreach (var result in validationResults)
-    {
-        var level = result.Status switch
+        finally
         {
-            CheckStatus.Pass => Microsoft.Extensions.Logging.LogLevel.Information,
-            CheckStatus.Warn => Microsoft.Extensions.Logging.LogLevel.Warning,
-            _ => Microsoft.Extensions.Logging.LogLevel.Error
+            await Log.CloseAndFlushAsync();
+        }
+    }
+
+    private static IConfiguration BuildConfiguration(string environmentName)
+    {
+        return new ConfigurationBuilder()
+            .SetBasePath(Directory.GetCurrentDirectory())
+            .AddJsonFile("appsettings.json", optional: false)
+            .AddJsonFile($"appsettings.{environmentName}.json", optional: true)
+            .AddJsonFile("appsettings.Local.json", optional: true)
+            .AddEnvironmentVariables()
+            .Build();
+    }
+
+    private static AppSettings BuildAppSettings(IConfiguration configuration)
+    {
+        return new AppSettings
+        {
+            ConnectionString = configuration["CONNECTION_STRING"]
+                ?? "Host=localhost;Database=talkingpoints;Username=postgres;Password=postgres",
+            AnthropicApiKey = configuration["ANTHROPIC_API_KEY"] ?? string.Empty,
+            BrowserlessUrl = configuration["BROWSERLESS_URL"] ?? "http://browserless:3000",
+            Smtp = new SmtpSettings
+            {
+                Host = configuration["SMTP_HOST"] ?? "smtp.gmail.com",
+                Port = int.TryParse(configuration["SMTP_PORT"], out var port) ? port : 587,
+                Username = configuration["SMTP_USERNAME"] ?? string.Empty,
+                Password = configuration["SMTP_PASSWORD"] ?? string.Empty,
+                FromEmail = configuration["SMTP_FROM"] ?? string.Empty,
+            },
+            ScheduleDayOfWeek = int.TryParse(configuration["SCHEDULE_DAY"], out var day) ? day : 1,
+            ScheduleHour = int.TryParse(configuration["SCHEDULE_HOUR"], out var hour) ? hour : 8,
         };
-        logger.Log(level, "[{Status}] {Name}: {Detail}", result.Status, result.Name, result.Detail);
     }
 
-    var failCount = validationResults.Count(r => r.Status == CheckStatus.Fail);
-    if (failCount > 0)
+    private static void ConfigureServices(IServiceCollection services, AppSettings appSettings)
     {
-        logger.LogCritical("{FailCount} startup check(s) failed. Aborting.", failCount);
-        Environment.Exit(1);
+        services.AddSingleton(Options.Create(appSettings));
+        services.AddLogging(builder => builder.ClearProviders().AddSerilog(Log.Logger));
+
+        services.AddDbContext<AppDbContext>(options =>
+            options.UseNpgsql(appSettings.ConnectionString,
+                npgsql => npgsql.MigrationsAssembly(typeof(Program).Assembly.GetName().Name ?? "TalkingPointsSummary")));
+
+        services.AddHttpClient<TalkingPointsApiClient>();
+        services.AddHttpClient<MessageCategorizer>();
+        services.AddHttpClient<NewsletterScraper>();
+        services.AddHttpClient<SummaryGenerator>();
+
+        services.AddScoped<MessageDeduplicator>();
+        services.AddSingleton<MarkdownConverter>();
+        services.AddScoped<EmailSender>();
+        services.AddScoped<PipelineOrchestrator>();
+        services.AddSingleton<WeeklyPipelineService>();
+        services.AddScoped<StartupValidator>();
     }
-}
 
-// --- Route: CLI mode or Worker mode ---
-if (args.Length > 0)
-{
-    var rootCommand = CommandHandler.BuildRootCommand(serviceProvider);
-    await rootCommand.Parse(args).InvokeAsync();
-}
-else
-{
-    logger.LogInformation("Starting Talking Points Summary worker service");
-
-    var pipeline = serviceProvider.GetRequiredService<WeeklyPipelineService>();
-    await pipeline.StartAsync(CancellationToken.None);
-
-    // Keep alive until Ctrl+C / SIGTERM
-    var cts = new CancellationTokenSource();
-    Console.CancelKeyPress += (_, e) =>
+    private static async Task RunCliAsync(string[] args, AppSettings appSettings)
     {
-        e.Cancel = true;
-        cts.Cancel();
-    };
+        var services = new ServiceCollection();
+        ConfigureServices(services, appSettings);
 
-    AppDomain.CurrentDomain.ProcessExit += (_, _) => cts.Cancel();
+        using var serviceProvider = services.BuildServiceProvider();
+        await InitializeApplicationAsync(serviceProvider);
 
-    try
-    {
-        await Task.Delay(Timeout.Infinite, cts.Token);
+        var rootCommand = CommandHandler.BuildRootCommand(serviceProvider);
+        await rootCommand.Parse(args).InvokeAsync();
     }
-    catch (OperationCanceledException) { }
 
-    await pipeline.StopAsync(CancellationToken.None);
-    logger.LogInformation("Worker service stopped");
-}
+    private static async Task RunWorkerAsync(IConfiguration configuration, AppSettings appSettings)
+    {
+        var builder = Host.CreateApplicationBuilder();
+        builder.Configuration.AddConfiguration(configuration);
+        ConfigureServices(builder.Services, appSettings);
+        builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<WeeklyPipelineService>());
 
-}
-catch (Exception ex)
-{
-    Log.Fatal(ex, "Application terminated unexpectedly");
-    throw;
-}
-finally
-{
-    await Log.CloseAndFlushAsync();
+        using var host = builder.Build();
+        await InitializeApplicationAsync(host.Services);
+        await host.RunAsync();
+    }
+
+    private static async Task RunDevelopmentWorkerAsync(
+        string[] args,
+        string environmentName,
+        IConfiguration configuration,
+        AppSettings appSettings)
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            Args = args,
+            EnvironmentName = environmentName,
+            ContentRootPath = Directory.GetCurrentDirectory()
+        });
+
+        builder.Configuration.AddConfiguration(configuration);
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
+        {
+            builder.WebHost.UseUrls("http://127.0.0.1:5101");
+        }
+
+        ConfigureServices(builder.Services, appSettings);
+        builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<WeeklyPipelineService>());
+
+        var app = builder.Build();
+        await InitializeApplicationAsync(app.Services);
+
+        app.MapPost("/debug/pipeline/run-now", async (WeeklyPipelineService pipeline) =>
+        {
+            var result = await pipeline.TryRunFullPipelineAsync("admin-debug", CancellationToken.None);
+            return result switch
+            {
+                PipelineRunStatus.Completed => Results.Ok(new
+                {
+                    status = "completed",
+                    message = "Pipeline run complete."
+                }),
+                PipelineRunStatus.AlreadyRunning => Results.Conflict(new
+                {
+                    status = "already-running",
+                    message = "A pipeline run is already in progress."
+                }),
+                _ => Results.Problem("Unexpected pipeline run status.")
+            };
+        });
+
+        await app.RunAsync();
+    }
+
+    private static async Task InitializeApplicationAsync(IServiceProvider services)
+    {
+        const int maxAttempts = 10;
+        const int delayMs = 3000;
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                using var scope = services.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                await db.Database.MigrateAsync();
+
+                var pending = (await db.Database.GetPendingMigrationsAsync()).ToList();
+                if (pending.Count > 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Schema verification failed: {pending.Count} migration(s) still pending after apply: {string.Join(", ", pending)}");
+                }
+
+                break;
+            }
+            catch (Exception ex) when (attempt < maxAttempts)
+            {
+                Log.Warning(ex, "Database migration attempt {Attempt}/{Max} failed, retrying in {Delay}ms",
+                    attempt, maxAttempts, delayMs);
+                await Task.Delay(delayMs);
+            }
+            catch (Exception ex)
+            {
+                Log.Fatal(ex, "Database migration failed after {MaxAttempts} attempts. Aborting startup.", maxAttempts);
+                throw;
+            }
+        }
+
+        var logger = services.GetRequiredService<ILogger<Program>>();
+
+        using var validationScope = services.CreateScope();
+        var validator = validationScope.ServiceProvider.GetRequiredService<StartupValidator>();
+        var validationResults = await validator.RunAllChecksAsync();
+
+        foreach (var result in validationResults)
+        {
+            var level = result.Status switch
+            {
+                CheckStatus.Pass => LogLevel.Information,
+                CheckStatus.Warn => LogLevel.Warning,
+                _ => LogLevel.Error
+            };
+
+            logger.Log(level, "[{Status}] {Name}: {Detail}", result.Status, result.Name, result.Detail);
+        }
+
+        var failCount = validationResults.Count(r => r.Status == CheckStatus.Fail);
+        if (failCount > 0)
+        {
+            logger.LogCritical("{FailCount} startup check(s) failed. Aborting.", failCount);
+            Environment.Exit(1);
+        }
+    }
 }

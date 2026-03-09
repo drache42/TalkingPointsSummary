@@ -23,12 +23,14 @@ if (builder.Configuration.GetValue<bool>("ManagePostgres", true))
     worker = builder.AddProject<Projects.TalkingPointsSummary>("worker")
         .WithReference(db)
         .WaitFor(db)
-        .WithEnvironment("CONNECTION_STRING", db);
+        .WithEnvironment("CONNECTION_STRING", db)
+        .WithEnvironment("ASPNETCORE_URLS", "http://127.0.0.1:5101");
 
     admin = builder.AddProject<Projects.TalkingPointsSummary_Admin>("admin")
         .WithReference(db)
         .WaitFor(db)
-        .WithEnvironment("CONNECTION_STRING", db);
+        .WithEnvironment("CONNECTION_STRING", db)
+        .WithEnvironment("WorkerDebugBaseUrl", "http://127.0.0.1:5101/");
 }
 else
 {
@@ -37,10 +39,12 @@ else
     var postgres = builder.AddConnectionString("postgres");
 
     worker = builder.AddProject<Projects.TalkingPointsSummary>("worker")
-        .WithEnvironment("CONNECTION_STRING", postgres);
+        .WithEnvironment("CONNECTION_STRING", postgres)
+        .WithEnvironment("ASPNETCORE_URLS", "http://127.0.0.1:5101");
 
     admin = builder.AddProject<Projects.TalkingPointsSummary_Admin>("admin")
-        .WithEnvironment("CONNECTION_STRING", postgres);
+        .WithEnvironment("CONNECTION_STRING", postgres)
+        .WithEnvironment("WorkerDebugBaseUrl", "http://127.0.0.1:5101/");
 }
 
 if (builder.Configuration.GetValue<bool>("ManageBrowserless", true))

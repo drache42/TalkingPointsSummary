@@ -1,3 +1,5 @@
+@inject IWebHostEnvironment Environment
+
 <ul class="nav nav-pills flex-column mb-auto">
     <li class="nav-item">
         <NavLink class="nav-link text-white" href="/" Match="NavLinkMatch.All" ActiveClass="active">
@@ -9,4 +11,12 @@
             Parents
         </NavLink>
     </li>
+    @if (Environment.IsDevelopment())
+    {
+        <li class="nav-item">
+            <NavLink class="nav-link text-white" href="/debug" ActiveClass="active">
+                Debug
+            </NavLink>
+        </li>
+    }
 </ul>

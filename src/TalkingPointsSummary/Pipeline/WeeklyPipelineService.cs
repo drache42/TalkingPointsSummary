@@ -3,10 +3,17 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Threading;
 using TalkingPointsSummary.Configuration;
 using TalkingPointsSummary.Data;
 
 namespace TalkingPointsSummary.Pipeline;
+
+public enum PipelineRunStatus
+{
+    Completed,
+    AlreadyRunning
+}
 
 /// <summary>
 /// Background service that runs the weekly pipeline on schedule.
@@ -17,7 +24,9 @@ public class WeeklyPipelineService : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<WeeklyPipelineService> _logger;
     private readonly AppSettings _settings;
+    private readonly SemaphoreSlim _runLock = new(1, 1);
     private DateTime? _lastRunDate;
+    private int _isRunInProgress;
 
     public WeeklyPipelineService(
         IServiceScopeFactory scopeFactory,
@@ -66,9 +75,16 @@ public class WeeklyPipelineService : BackgroundService
                 var now = DateTime.UtcNow;
                 if (ShouldRun(now))
                 {
-                    _logger.LogInformation("Schedule triggered — starting weekly pipeline run");
-                    await RunFullPipelineAsync(stoppingToken);
-                    _lastRunDate = now.Date;
+                    _logger.LogInformation("Schedule triggered - evaluating weekly pipeline run");
+                    var result = await TryRunFullPipelineAsync("schedule", stoppingToken);
+                    if (result == PipelineRunStatus.Completed)
+                    {
+                        _lastRunDate = now.Date;
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Scheduled pipeline run skipped because another run is already in progress");
+                    }
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -104,6 +120,36 @@ public class WeeklyPipelineService : BackgroundService
     /// Runs the full pipeline for all active parents. Can be called manually via CLI.
     /// </summary>
     public async Task RunFullPipelineAsync(CancellationToken ct = default)
+    {
+        var result = await TryRunFullPipelineAsync("manual", ct);
+        if (result == PipelineRunStatus.AlreadyRunning)
+            throw new InvalidOperationException("A pipeline run is already in progress.");
+    }
+
+    public bool IsRunInProgress => Volatile.Read(ref _isRunInProgress) == 1;
+
+    public async Task<PipelineRunStatus> TryRunFullPipelineAsync(string trigger, CancellationToken ct = default)
+    {
+        if (!await _runLock.WaitAsync(TimeSpan.Zero, ct))
+            return PipelineRunStatus.AlreadyRunning;
+
+        Interlocked.Exchange(ref _isRunInProgress, 1);
+
+        try
+        {
+            _logger.LogInformation("Pipeline run started by {Trigger}", trigger);
+            await RunPipelineCoreAsync(ct);
+            _logger.LogInformation("Pipeline run started by {Trigger} completed", trigger);
+            return PipelineRunStatus.Completed;
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _isRunInProgress, 0);
+            _runLock.Release();
+        }
+    }
+
+    private async Task RunPipelineCoreAsync(CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
