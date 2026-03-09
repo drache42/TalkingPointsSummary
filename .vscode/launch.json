@@ -1,0 +1,61 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // Default F5: starts everything (Postgres, Browserless, Mailpit, Worker, Admin)
+      // Opens the Aspire dashboard in the browser
+      "name": "AppHost (http)",
+      "type": "dotnet",
+      "request": "launch",
+      "projectPath": "${workspaceFolder}/src/TalkingPointsSummary.AppHost/TalkingPointsSummary.AppHost.csproj",
+      "launchProfileName": "http",
+      "preLaunchTask": "build"
+    },
+    {
+      // Same as above but passes "run" to the worker so it executes immediately
+      "name": "AppHost (run now)",
+      "type": "dotnet",
+      "request": "launch",
+      "projectPath": "${workspaceFolder}/src/TalkingPointsSummary.AppHost/TalkingPointsSummary.AppHost.csproj",
+      "launchProfileName": "http (run now)",
+      "preLaunchTask": "build"
+    },
+    {
+      // Starts everything and passes "check-config" to the worker
+      "name": "AppHost (check-config)",
+      "type": "dotnet",
+      "request": "launch",
+      "projectPath": "${workspaceFolder}/src/TalkingPointsSummary.AppHost/TalkingPointsSummary.AppHost.csproj",
+      "launchProfileName": "http (check-config)",
+      "preLaunchTask": "build"
+    },
+    {
+      // Run the Worker directly (no Aspire, no containers)
+      // Reads CONNECTION_STRING from launchSettings.json or user secrets
+      "name": "Worker only",
+      "type": "dotnet",
+      "request": "launch",
+      "projectPath": "${workspaceFolder}/src/TalkingPointsSummary/TalkingPointsSummary.csproj",
+      "launchProfileName": "TalkingPointsSummary (worker)",
+      "preLaunchTask": "build"
+    },
+    {
+      // Run the Worker directly with "run" command
+      "name": "Worker only (run now)",
+      "type": "dotnet",
+      "request": "launch",
+      "projectPath": "${workspaceFolder}/src/TalkingPointsSummary/TalkingPointsSummary.csproj",
+      "launchProfileName": "TalkingPointsSummary (run now)",
+      "preLaunchTask": "build"
+    },
+    {
+      // Run the Admin Blazor app directly (no Aspire, no containers)
+      "name": "Admin only",
+      "type": "dotnet",
+      "request": "launch",
+      "projectPath": "${workspaceFolder}/src/TalkingPointsSummary.Admin/TalkingPointsSummary.Admin.csproj",
+      "launchProfileName": "http",
+      "preLaunchTask": "build"
+    }
+  ]
+}

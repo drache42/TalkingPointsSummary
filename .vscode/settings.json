@@ -1,0 +1,5 @@
+{
+  // The C# Dev Kit extension uses this to know which project is the "startup" project,
+  // matching the Visual Studio startup project experience.
+  "dotnet.defaultSolution": "TalkingPointsSummary.sln"
+}
