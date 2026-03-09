@@ -72,12 +72,24 @@ internal sealed class Program
 
     private static AppSettings BuildAppSettings(IConfiguration configuration)
     {
+        var browserlessUrl = configuration["BROWSERLESS_URL"];
+        if (string.IsNullOrWhiteSpace(browserlessUrl))
+        {
+            var browserlessHost = configuration["BROWSERLESS_HOST"];
+            var browserlessPort = configuration["BROWSERLESS_PORT"];
+
+            if (!string.IsNullOrWhiteSpace(browserlessHost) && !string.IsNullOrWhiteSpace(browserlessPort))
+            {
+                browserlessUrl = $"http://{browserlessHost}:{browserlessPort}";
+            }
+        }
+
         return new AppSettings
         {
             ConnectionString = configuration["CONNECTION_STRING"]
                 ?? "Host=localhost;Database=talkingpoints;Username=postgres;Password=postgres",
             AnthropicApiKey = configuration["ANTHROPIC_API_KEY"] ?? string.Empty,
-            BrowserlessUrl = configuration["BROWSERLESS_URL"] ?? "http://browserless:3000",
+            BrowserlessUrl = browserlessUrl ?? "http://browserless:3000",
             Smtp = new SmtpSettings
             {
                 Host = configuration["SMTP_HOST"] ?? "smtp.gmail.com",
@@ -102,7 +114,10 @@ internal sealed class Program
 
         services.AddHttpClient<TalkingPointsApiClient>();
         services.AddHttpClient<MessageCategorizer>();
-        services.AddHttpClient<NewsletterScraper>();
+        services.AddHttpClient<NewsletterScraper>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(90);
+        });
         services.AddHttpClient<SummaryGenerator>();
 
         services.AddScoped<MessageDeduplicator>();

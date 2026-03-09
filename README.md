@@ -118,6 +118,10 @@ The solution uses [.NET Aspire](https://learn.microsoft.com/en-us/dotnet/aspire/
 
 **On a machine with external PostgreSQL:** Set `ManagePostgres: false` and supply a connection string in the AppHost via user secrets — no code changes needed. See [docs/F5-DEBUGGING.md](docs/F5-DEBUGGING.md).
 
+**With an external Browserless service:** Set `ManageBrowserless: false` and configure `BrowserlessUrl` in the AppHost. The worker will use that external endpoint instead of the Aspire-managed container.
+
+**On a machine with external Browserless:** Set `ManageBrowserless: false` and supply `BrowserlessUrl` in the AppHost via user secrets or `appsettings.Development.json`. See [docs/F5-DEBUGGING.md](docs/F5-DEBUGGING.md).
+
 **Prerequisite:** Docker Desktop running with `postgres:15-alpine` pulled.
 
 ### Manual Development

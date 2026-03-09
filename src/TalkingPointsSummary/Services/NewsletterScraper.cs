@@ -46,8 +46,6 @@ public class NewsletterScraper
             var request = new HttpRequestMessage(HttpMethod.Post, scrapeUrl);
             request.Content = JsonContent.Create(requestBody);
 
-            _httpClient.Timeout = TimeSpan.FromSeconds(90);
-
             var response = await _httpClient.SendAsync(request, ct);
             response.EnsureSuccessStatusCode();
 

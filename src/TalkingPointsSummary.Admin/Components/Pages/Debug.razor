@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @inject IWebHostEnvironment Environment
 @inject PipelineDebugClient PipelineDebugClient
+@inject IDbContextFactory<AppDbContext> DbFactory
 
 <PageTitle>Debug - TalkingPoints Admin</PageTitle>
 
@@ -41,10 +42,70 @@ else
         </div>
     </div>
 
-    @if (!string.IsNullOrWhiteSpace(_statusMessage))
+    <div class="card border-danger shadow-sm mb-3">
+        <div class="card-body">
+            <h5 class="card-title text-danger">Clear Pipeline Data</h5>
+            <p class="card-text text-muted mb-3">
+                Delete all messages, summaries, and news items while keeping parents and children.
+            </p>
+
+            @if (_dataCountsLoading)
+            {
+                <p class="text-muted mb-3">Loading current counts...</p>
+            }
+            else
+            {
+                <div class="row g-3 mb-3">
+                    <div class="col-sm-4">
+                        <div class="border rounded p-3 bg-light-subtle h-100">
+                            <div class="small text-muted">Messages</div>
+                            <div class="fs-4 fw-semibold">@_messageCount</div>
+                        </div>
+                    </div>
+                    <div class="col-sm-4">
+                        <div class="border rounded p-3 bg-light-subtle h-100">
+                            <div class="small text-muted">Summaries</div>
+                            <div class="fs-4 fw-semibold">@_summaryCount</div>
+                        </div>
+                    </div>
+                    <div class="col-sm-4">
+                        <div class="border rounded p-3 bg-light-subtle h-100">
+                            <div class="small text-muted">News Items</div>
+                            <div class="fs-4 fw-semibold">@_newsItemCount</div>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            <div class="form-check mb-3">
+                <input id="confirm-clear-data"
+                       class="form-check-input"
+                       type="checkbox"
+                       @bind="_confirmClearData" />
+                <label class="form-check-label" for="confirm-clear-data">
+                    I understand this deletes all messages, summaries, and news items.
+                </label>
+            </div>
+
+            <button class="btn btn-outline-danger"
+                    @onclick="ClearPipelineDataAsync"
+                    disabled="@(_isClearingData || !_confirmClearData)">
+                @(_isClearingData ? "Deleting..." : "Delete Messages, Summaries, News")
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_runStatusMessage))
     {
-        <div class="alert @StatusAlertClass" role="alert">
-            @_statusMessage
+        <div class="alert @RunStatusAlertClass" role="alert">
+            @_runStatusMessage
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_clearStatusMessage))
+    {
+        <div class="alert @ClearStatusAlertClass" role="alert">
+            @_clearStatusMessage
         </div>
     }
 }
@@ -53,9 +114,17 @@ else
     private bool _isRunning;
     private bool? _lastRunSucceeded;
     private bool _lastRunWasConflict;
-    private string? _statusMessage;
+    private string? _runStatusMessage;
+    private bool _dataCountsLoading = true;
+    private bool _isClearingData;
+    private bool _confirmClearData;
+    private int _messageCount;
+    private int _summaryCount;
+    private int _newsItemCount;
+    private bool? _lastClearSucceeded;
+    private string? _clearStatusMessage;
 
-    private string StatusAlertClass => _isRunning
+    private string RunStatusAlertClass => _isRunning
         ? "alert-info"
         : _lastRunSucceeded == true
             ? "alert-success"
@@ -63,29 +132,91 @@ else
                 ? "alert-warning"
                 : "alert-danger";
 
+    private string ClearStatusAlertClass => _isClearingData
+        ? "alert-info"
+        : _lastClearSucceeded == true
+            ? "alert-success"
+            : "alert-danger";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataCountsAsync();
+    }
+
     private async Task RunNowAsync()
     {
         _isRunning = true;
         _lastRunSucceeded = null;
         _lastRunWasConflict = false;
-        _statusMessage = "Running pipeline...";
+        _runStatusMessage = "Running pipeline...";
 
         try
         {
             var result = await PipelineDebugClient.RunNowAsync();
             _lastRunSucceeded = result.Success;
             _lastRunWasConflict = result.AlreadyRunning;
-            _statusMessage = result.Message;
+            _runStatusMessage = result.Message;
         }
         catch (Exception ex)
         {
             _lastRunSucceeded = false;
             _lastRunWasConflict = false;
-            _statusMessage = $"Pipeline trigger failed: {ex.Message}";
+            _runStatusMessage = $"Pipeline trigger failed: {ex.Message}";
         }
         finally
         {
             _isRunning = false;
+        }
+    }
+
+    private async Task ClearPipelineDataAsync()
+    {
+        _isClearingData = true;
+        _lastClearSucceeded = null;
+        _clearStatusMessage = "Deleting messages, summaries, and news items...";
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await using var transaction = await db.Database.BeginTransactionAsync();
+
+            var deletedMessages = await db.Messages.ExecuteDeleteAsync();
+            var deletedSummaries = await db.Summaries.ExecuteDeleteAsync();
+            var deletedNewsItems = await db.NewsItems.ExecuteDeleteAsync();
+
+            await transaction.CommitAsync();
+
+            _lastClearSucceeded = true;
+            _confirmClearData = false;
+            _clearStatusMessage = $"Deleted {deletedMessages} messages, {deletedSummaries} summaries, and {deletedNewsItems} news items.";
+
+            await LoadDataCountsAsync();
+        }
+        catch (Exception ex)
+        {
+            _lastClearSucceeded = false;
+            _clearStatusMessage = $"Delete failed: {ex.Message}";
+        }
+        finally
+        {
+            _isClearingData = false;
+        }
+    }
+
+    private async Task LoadDataCountsAsync()
+    {
+        _dataCountsLoading = true;
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            _messageCount = await db.Messages.CountAsync();
+            _summaryCount = await db.Summaries.CountAsync();
+            _newsItemCount = await db.NewsItems.CountAsync();
+        }
+        finally
+        {
+            _dataCountsLoading = false;
         }
     }
 }

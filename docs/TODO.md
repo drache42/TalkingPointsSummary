@@ -7,3 +7,5 @@
 * Run code review bot
 * config needs cleanup, update, docs
 * Ask AI to make a "data flow" diagram so I can see how it all works together
+* Task.Delay is a code smell. verify it doesn't exist anywhere
+* BrowserlessUrl": null, seems odd. I need to check appsettings why that's there

@@ -51,13 +51,27 @@ if (builder.Configuration.GetValue<bool>("ManageBrowserless", true))
 {
     // Aspire manages a local Browserless container (default for Docker-based dev machines)
     var browserless = builder.AddContainer("browserless", "browserless/chrome")
-        .WithHttpEndpoint(port: 3000, targetPort: 3000)
+        .WithHttpEndpoint(targetPort: 3000)
         .WithEnvironment("MAX_CONCURRENT_SESSIONS", "2")
         .WithEnvironment("MAX_QUEUE_LENGTH", "5");
 
+    var browserlessEndpoint = browserless.GetEndpoint("http");
+
     worker
         .WaitFor(browserless)
-        .WithEnvironment("BROWSERLESS_URL", browserless.GetEndpoint("http"));
+        .WithEnvironment("BROWSERLESS_HOST", browserlessEndpoint.Property(EndpointProperty.Host))
+        .WithEnvironment("BROWSERLESS_PORT", browserlessEndpoint.Property(EndpointProperty.Port));
+}
+else
+{
+    var browserlessUrl = builder.Configuration["BrowserlessUrl"];
+    if (string.IsNullOrWhiteSpace(browserlessUrl))
+    {
+        throw new InvalidOperationException(
+            "ManageBrowserless is false, but BrowserlessUrl is not configured. Set BrowserlessUrl in AppHost configuration or user secrets.");
+    }
+
+    worker.WithEnvironment("BROWSERLESS_URL", browserlessUrl);
 }
 
 if (builder.Configuration.GetValue<bool>("ManageMailpit", true))

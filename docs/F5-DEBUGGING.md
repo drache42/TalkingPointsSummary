@@ -37,6 +37,27 @@ dotnet user-secrets set ConnectionStrings:postgres "Host=...;Database=talkingpoi
 
 The Worker Service code is unaffected in either case.
 
+## Using an External Browserless Service
+
+If Browserless is running outside Aspire, disable the managed container and provide the external base URL in the AppHost:
+
+```json
+{
+  "ManageBrowserless": false,
+  "BrowserlessUrl": "http://127.0.0.1:50660"
+}
+```
+
+To use user secrets:
+
+```bash
+cd src/TalkingPointsSummary.AppHost
+dotnet user-secrets set ManageBrowserless false
+dotnet user-secrets set BrowserlessUrl "http://127.0.0.1:50660"
+```
+
+When `ManageBrowserless` is `false`, the AppHost now requires `BrowserlessUrl` to be set and injects it into the worker as `BROWSERLESS_URL`.
+
 ## Running the Worker Directly (Without Aspire)
 
 If you want to run or debug the `TalkingPointsSummary` worker project directly — without starting the AppHost — the connection string is read from `CONNECTION_STRING` in `src/TalkingPointsSummary/Properties/launchSettings.json`:

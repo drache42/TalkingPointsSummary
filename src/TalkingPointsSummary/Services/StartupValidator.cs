@@ -146,14 +146,31 @@ public class StartupValidator
         {
             var client = _httpClientFactory.CreateClient();
             client.Timeout = TimeSpan.FromSeconds(10);
-            var url = _settings.BrowserlessUrl.TrimEnd('/') + "/";
-            var response = await client.GetAsync(url, ct);
+            var scrapeUrl = _settings.BrowserlessUrl.TrimEnd('/') + "/scrape";
+            using var request = new HttpRequestMessage(HttpMethod.Post, scrapeUrl)
+            {
+                Content = JsonContent.Create(new
+                {
+                    url = "https://example.com",
+                    elements = new[] { new { selector = "h1" } },
+                    gotoOptions = new { waitUntil = "networkidle2", timeout = 10000 }
+                })
+            };
 
-            return (int)response.StatusCode < 500
+            var response = await client.SendAsync(request, ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return new ValidationCheckResult("Browserless reachability", CheckStatus.Fail,
+                    $"Browserless scrape endpoint failed at {scrapeUrl} (HTTP {(int)response.StatusCode})");
+            }
+
+            var payload = await response.Content.ReadAsStringAsync(ct);
+            return payload.Contains("Example Domain", StringComparison.Ordinal)
                 ? new ValidationCheckResult("Browserless reachability", CheckStatus.Pass,
-                    $"Reachable at {_settings.BrowserlessUrl} (HTTP {(int)response.StatusCode})")
+                    $"Scrape endpoint responded successfully at {scrapeUrl}")
                 : new ValidationCheckResult("Browserless reachability", CheckStatus.Fail,
-                    $"Server error at {_settings.BrowserlessUrl} (HTTP {(int)response.StatusCode})");
+                    $"Scrape endpoint responded at {scrapeUrl} but did not return expected content");
         }
         catch (Exception ex)
         {
