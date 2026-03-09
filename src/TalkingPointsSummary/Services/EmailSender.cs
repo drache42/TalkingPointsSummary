@@ -46,7 +46,13 @@ public class EmailSender
 
         using var client = new SmtpClient();
         await client.ConnectAsync(_settings.Smtp.Host, _settings.Smtp.Port, SecureSocketOptions.Auto, ct);
-        await client.AuthenticateAsync(_settings.Smtp.Username, _settings.Smtp.Password, ct);
+
+        if (client.Capabilities.HasFlag(SmtpCapabilities.Authentication)
+            && !string.IsNullOrWhiteSpace(_settings.Smtp.Username))
+        {
+            await client.AuthenticateAsync(_settings.Smtp.Username, _settings.Smtp.Password, ct);
+        }
+
         await client.SendAsync(message, ct);
         await client.DisconnectAsync(true, ct);
 

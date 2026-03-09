@@ -172,6 +172,13 @@ public class StartupValidator
             using var client = new SmtpClient();
             await client.ConnectAsync(_settings.Smtp.Host, _settings.Smtp.Port, SecureSocketOptions.Auto, ct);
 
+            if (!client.Capabilities.HasFlag(SmtpCapabilities.Authentication))
+            {
+                await client.DisconnectAsync(true, ct);
+                return new ValidationCheckResult("SMTP connectivity", CheckStatus.Warn,
+                    $"Connected to {_settings.Smtp.Host}:{_settings.Smtp.Port} — server does not require authentication (e.g. Mailpit)");
+            }
+
             if (string.IsNullOrWhiteSpace(_settings.Smtp.Username) || string.IsNullOrWhiteSpace(_settings.Smtp.Password))
             {
                 await client.DisconnectAsync(true, ct);
