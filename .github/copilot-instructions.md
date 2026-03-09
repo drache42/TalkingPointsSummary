@@ -86,16 +86,23 @@ This rule applies to ALL responses, including technical details, code behavior, 
 
 **Always prefer skill knowledge over generic approach when a skill is available**
 
+### Available Skills
+
+| Skill file | Trigger topics |
+|---|---|
+| `.github/skills/postgres-database-access/SKILL.md` | postgres, database, SQL, query, table, DbContext, migration, connection string |
+
 ### When to Check Skills
 
 **ALWAYS** check skills when the user's request involves:
 - Creating or updating skills themselves
 - Any domain-specific task that might have a skill available
+- Any topic matching a skill's trigger topics listed above
 
 ### How to Use Skills
 
-1. **Before proceeding** with a complex task, check if a relevant skill exists
-2. **Load the skill file** using `read_file` tool to acquire full instructions
+1. **Before proceeding** with a complex task, check the Available Skills table above
+2. **Load the matching skill file** using `get_file` tool to acquire full instructions
 3. **Reference and follow** the skill's guidance and procedures
 4. **Apply skill knowledge** to solve the user's problem more effectively
 
