@@ -1,7 +1,10 @@
 using Aspire.Hosting;
+using Aspire.Hosting.ApplicationModel;
 using Microsoft.Extensions.Configuration;
 
 var builder = DistributedApplication.CreateBuilder(args);
+
+IResourceBuilder<ProjectResource> worker;
 
 if (builder.Configuration.GetValue<bool>("ManagePostgres", true))
 {
@@ -14,7 +17,7 @@ if (builder.Configuration.GetValue<bool>("ManagePostgres", true))
 
     var db = postgres.AddDatabase("talkingpoints");
 
-    builder.AddProject<Projects.TalkingPointsSummary>("worker")
+    worker = builder.AddProject<Projects.TalkingPointsSummary>("worker")
         .WithReference(db)
         .WaitFor(db)
         .WithEnvironment("CONNECTION_STRING", db);
@@ -25,8 +28,21 @@ else
     //   "ConnectionStrings": { "postgres": "Host=...;Database=...;Username=...;Password=..." }
     var postgres = builder.AddConnectionString("postgres");
 
-    builder.AddProject<Projects.TalkingPointsSummary>("worker")
+    worker = builder.AddProject<Projects.TalkingPointsSummary>("worker")
         .WithEnvironment("CONNECTION_STRING", postgres);
+}
+
+if (builder.Configuration.GetValue<bool>("ManageBrowserless", true))
+{
+    // Aspire manages a local Browserless container (default for Docker-based dev machines)
+    var browserless = builder.AddContainer("browserless", "browserless/chrome")
+        .WithHttpEndpoint(port: 3000, targetPort: 3000)
+        .WithEnvironment("MAX_CONCURRENT_SESSIONS", "2")
+        .WithEnvironment("MAX_QUEUE_LENGTH", "5");
+
+    worker
+        .WaitFor(browserless)
+        .WithEnvironment("BROWSERLESS_URL", browserless.GetEndpoint("http"));
 }
 
 builder.Build().Run();

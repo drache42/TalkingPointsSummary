@@ -5,8 +5,7 @@
       "commandName": "Project",
       "dotnetRunMessages": true,
       "environmentVariables": {
-        "DOTNET_ENVIRONMENT": "Development",
-        "CONNECTION_STRING": "Host=localhost;Database=talkingpoints;Username=postgres;Password=postgres"
+        "DOTNET_ENVIRONMENT": "Development"
       }
     }
   }

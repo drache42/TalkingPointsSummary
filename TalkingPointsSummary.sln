@@ -1,4 +1,3 @@
-
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
 VisualStudioVersion = 18.3.11520.95
@@ -24,7 +23,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{F596720C-1
 		docs\CLI.md = docs\CLI.md
 		docs\F5-DEBUGGING.md = docs\F5-DEBUGGING.md
 		docs\n8n-flow.json = docs\n8n-flow.json
-		TODO.md = TODO.md
+		docs\TODO.md = docs\TODO.md
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TalkingPointsSummary.AppHost", "src\TalkingPointsSummary.AppHost\TalkingPointsSummary.AppHost.csproj", "{73C8CA79-E516-49A9-94A7-E56E6C5A7AD3}"
@@ -85,7 +84,7 @@ Global
 		{73C8CA79-E516-49A9-94A7-E56E6C5A7AD3} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {5033803B-B09A-4121-AA59-A548EE3697A4}
 		StartupProject = {73C8CA79-E516-49A9-94A7-E56E6C5A7AD3}
+		SolutionGuid = {5033803B-B09A-4121-AA59-A548EE3697A4}
 	EndGlobalSection
 EndGlobal

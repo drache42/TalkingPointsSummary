@@ -172,9 +172,14 @@ public class StartupValidator
             using var client = new SmtpClient();
             await client.ConnectAsync(_settings.Smtp.Host, _settings.Smtp.Port, SecureSocketOptions.StartTls, ct);
 
-            if (!string.IsNullOrWhiteSpace(_settings.Smtp.Username))
-                await client.AuthenticateAsync(_settings.Smtp.Username, _settings.Smtp.Password, ct);
+            if (string.IsNullOrWhiteSpace(_settings.Smtp.Username) || string.IsNullOrWhiteSpace(_settings.Smtp.Password))
+            {
+                await client.DisconnectAsync(true, ct);
+                return new ValidationCheckResult("SMTP connectivity", CheckStatus.Warn,
+                    $"Connected to {_settings.Smtp.Host}:{_settings.Smtp.Port} but credentials are not set — authentication skipped");
+            }
 
+            await client.AuthenticateAsync(_settings.Smtp.Username, _settings.Smtp.Password, ct);
             await client.DisconnectAsync(true, ct);
 
             return new ValidationCheckResult("SMTP connectivity", CheckStatus.Pass,

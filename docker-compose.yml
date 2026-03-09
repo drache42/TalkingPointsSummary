@@ -3,6 +3,11 @@ services:
     build: .
     container_name: talking-points-summary
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      browserless:
+        condition: service_healthy
     environment:
       - CONNECTION_STRING=Host=postgres;Database=talkingpoints;Username=postgres;Password=postgres
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
@@ -31,6 +36,22 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
+      timeout: 5s
+      retries: 5
+
+  browserless:
+    image: browserless/chrome
+    container_name: talkingpoints-browserless
+    restart: unless-stopped
+    environment:
+      - MAX_CONCURRENT_SESSIONS=20
+      - CONNECTION_TIMEOUT=60000
+      - MAX_QUEUE_LENGTH=100
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/ || exit 1"]
+      interval: 10s
       timeout: 5s
       retries: 5
 

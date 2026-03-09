@@ -6,4 +6,4 @@
 * update to .net 10
 * enable public methods need comments and error otherwise
 * Run code review bot
-* 
+* config needs cleanup, update, docs

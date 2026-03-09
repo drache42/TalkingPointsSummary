@@ -15,6 +15,7 @@ var configuration = new ConfigurationBuilder()
     .SetBasePath(Directory.GetCurrentDirectory())
     .AddJsonFile("appsettings.json", optional: false)
     .AddJsonFile($"appsettings.{environment}.json", optional: true)
+    .AddJsonFile("appsettings.Local.json", optional: true)
     .AddEnvironmentVariables()
     .Build();
 
@@ -29,20 +30,20 @@ try
 // --- Build configuration from environment variables ---
 var appSettings = new AppSettings
 {
-    ConnectionString = Environment.GetEnvironmentVariable("CONNECTION_STRING")
+    ConnectionString = configuration["CONNECTION_STRING"]
         ?? "Host=localhost;Database=talkingpoints;Username=postgres;Password=postgres",
-    AnthropicApiKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY") ?? string.Empty,
-    BrowserlessUrl = Environment.GetEnvironmentVariable("BROWSERLESS_URL") ?? "http://browserless:3000",
+    AnthropicApiKey = configuration["ANTHROPIC_API_KEY"] ?? string.Empty,
+    BrowserlessUrl = configuration["BROWSERLESS_URL"] ?? "http://browserless:3000",
     Smtp = new SmtpSettings
     {
-        Host = Environment.GetEnvironmentVariable("SMTP_HOST") ?? "smtp.gmail.com",
-        Port = int.TryParse(Environment.GetEnvironmentVariable("SMTP_PORT"), out var port) ? port : 587,
-        Username = Environment.GetEnvironmentVariable("SMTP_USERNAME") ?? string.Empty,
-        Password = Environment.GetEnvironmentVariable("SMTP_PASSWORD") ?? string.Empty,
-        FromEmail = Environment.GetEnvironmentVariable("SMTP_FROM") ?? string.Empty,
+        Host = configuration["SMTP_HOST"] ?? "smtp.gmail.com",
+        Port = int.TryParse(configuration["SMTP_PORT"], out var port) ? port : 587,
+        Username = configuration["SMTP_USERNAME"] ?? string.Empty,
+        Password = configuration["SMTP_PASSWORD"] ?? string.Empty,
+        FromEmail = configuration["SMTP_FROM"] ?? string.Empty,
     },
-    ScheduleDayOfWeek = int.TryParse(Environment.GetEnvironmentVariable("SCHEDULE_DAY"), out var day) ? day : 1,
-    ScheduleHour = int.TryParse(Environment.GetEnvironmentVariable("SCHEDULE_HOUR"), out var hour) ? hour : 8,
+    ScheduleDayOfWeek = int.TryParse(configuration["SCHEDULE_DAY"], out var day) ? day : 1,
+    ScheduleHour = int.TryParse(configuration["SCHEDULE_HOUR"], out var hour) ? hour : 8,
 };
 
 // --- Build DI container (shared between CLI and Worker modes) ---
