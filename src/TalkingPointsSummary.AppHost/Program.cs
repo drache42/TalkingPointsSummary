@@ -61,4 +61,9 @@ if (builder.Configuration.GetValue<bool>("ManageMailpit", true))
         .WithEnvironment("SMTP_PORT", smtpEndpoint.Property(EndpointProperty.Port));
 }
 
+// Pass optional CLI args to the worker (e.g. "run" or "check-config" set via AppHost launch profile)
+var workerArgs = builder.Configuration["WorkerArgs"];
+if (!string.IsNullOrWhiteSpace(workerArgs))
+    worker.WithArgs(workerArgs.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+
 builder.Build().Run();

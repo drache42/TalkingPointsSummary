@@ -1,8 +1,24 @@
 ﻿{
   "$schema": "https://json.schemastore.org/launchsettings.json",
   "profiles": {
-    "TalkingPointsSummary": {
+    "TalkingPointsSummary (worker)": {
       "commandName": "Project",
+      "dotnetRunMessages": true,
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Development"
+      }
+    },
+    "TalkingPointsSummary (run now)": {
+      "commandName": "Project",
+      "commandLineArgs": "run",
+      "dotnetRunMessages": true,
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Development"
+      }
+    },
+    "TalkingPointsSummary (check-config)": {
+      "commandName": "Project",
+      "commandLineArgs": "check-config",
       "dotnetRunMessages": true,
       "environmentVariables": {
         "DOTNET_ENVIRONMENT": "Development"
