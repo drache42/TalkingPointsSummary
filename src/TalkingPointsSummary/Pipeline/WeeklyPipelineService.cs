@@ -102,27 +102,6 @@ public class WeeklyPipelineService : BackgroundService
             (DayOfWeek)_schedule.DayOfWeek,
             _schedule.Hour);
 
-        // Gate: do not start the scheduler until migrations are fully applied.
-        // This makes the service self-resilient if somehow ExecuteAsync starts before
-        // Program.cs has finished applying migrations.
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                using var scope = _scopeFactory.CreateScope();
-                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                var pending = (await db.Database.GetPendingMigrationsAsync(stoppingToken)).ToList();
-                if (pending.Count == 0)
-                    break;
-                _logger.LogWarning("Database has {Count} pending migration(s), waiting before starting scheduler", pending.Count);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Database not ready, waiting before starting scheduler");
-            }
-            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
-        }
-
         using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1));
 
         while (await timer.WaitForNextTickAsync(stoppingToken))

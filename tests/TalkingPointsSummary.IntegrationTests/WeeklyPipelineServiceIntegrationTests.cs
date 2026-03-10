@@ -196,7 +196,7 @@ public class WeeklyPipelineServiceIntegrationTests : IAsyncLifetime
                 return;
             }
 
-            await Task.Delay(10);
+            await Task.Yield();
         }
 
         throw new TimeoutException("Timed out waiting for pipeline state transition.");

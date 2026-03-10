@@ -115,7 +115,9 @@ internal sealed class Program
 
         using var host = builder.Build();
         WorkerConfiguration.EnsureValidatedOptions(host.Services);
-        await InitializeApplicationAsync(host.Services);
+        await InitializeApplicationAsync(
+            host.Services,
+            host.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping);
         await host.RunAsync();
     }
 
@@ -144,7 +146,9 @@ internal sealed class Program
 
         var app = builder.Build();
         WorkerConfiguration.EnsureValidatedOptions(app.Services);
-        await InitializeApplicationAsync(app.Services);
+        await InitializeApplicationAsync(
+            app.Services,
+            app.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping);
 
         app.MapPost("/debug/pipeline/run-now", async (PipelineRunRequest? request, WeeklyPipelineService pipeline) =>
         {
@@ -177,10 +181,11 @@ internal sealed class Program
         await app.RunAsync();
     }
 
-    private static async Task InitializeApplicationAsync(IServiceProvider services)
+    private static async Task InitializeApplicationAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         const int maxAttempts = 10;
         const int delayMs = 3000;
+        var timeProvider = services.GetRequiredService<TimeProvider>();
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
@@ -203,7 +208,16 @@ internal sealed class Program
             {
                 Log.Warning(ex, "Database migration attempt {Attempt}/{Max} failed, retrying in {Delay}ms",
                     attempt, maxAttempts, delayMs);
-                await Task.Delay(delayMs);
+
+                try
+                {
+                    await DelayAsync(timeProvider, TimeSpan.FromMilliseconds(delayMs), cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    Log.Warning("Database migration retry wait was cancelled. Aborting startup.");
+                    throw;
+                }
             }
             catch (Exception ex)
             {
@@ -235,6 +249,47 @@ internal sealed class Program
         {
             logger.LogCritical("{FailCount} startup check(s) failed. Aborting.", failCount);
             Environment.Exit(1);
+        }
+    }
+
+    private static Task DelayAsync(TimeProvider timeProvider, TimeSpan delay, CancellationToken cancellationToken)
+    {
+        if (delay <= TimeSpan.Zero)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromCanceled(cancellationToken);
+        }
+
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var timer = timeProvider.CreateTimer(
+            static state => ((TaskCompletionSource)state!).TrySetResult(),
+            completion,
+            delay,
+            Timeout.InfiniteTimeSpan);
+
+        var registration = cancellationToken.Register(static state =>
+        {
+            var (taskCompletionSource, token) = ((TaskCompletionSource, CancellationToken))state!;
+            taskCompletionSource.TrySetCanceled(token);
+        }, (completion, cancellationToken));
+
+        return AwaitDelayAsync(completion.Task, timer, registration);
+    }
+
+    private static async Task AwaitDelayAsync(Task delayTask, ITimer timer, CancellationTokenRegistration registration)
+    {
+        try
+        {
+            await delayTask;
+        }
+        finally
+        {
+            registration.Dispose();
+            timer.Dispose();
         }
     }
 }

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
+using System.Diagnostics;
 using TalkingPointsSummary.Configuration;
 using TalkingPointsSummary.Data;
 using TalkingPointsSummary.Models;
@@ -128,8 +129,7 @@ public class WeeklyPipelineServiceTests : IDisposable
         // Start first run (will block on slowApiClient)
         var firstRun = service.TryRunFullPipelineAsync("test");
 
-        // Give it a moment to acquire the lock
-        await Task.Delay(100);
+        await WaitForConditionAsync(() => service.IsRunInProgress, TimeSpan.FromSeconds(1));
 
         // Second call should return AlreadyRunning
         var secondResult = await service.TryRunFullPipelineAsync("test");
@@ -203,15 +203,7 @@ public class WeeklyPipelineServiceTests : IDisposable
 
         tcs.SetResult();
 
-        for (var attempt = 0; attempt < 20; attempt++)
-        {
-            if (!service.IsRunInProgress)
-            {
-                break;
-            }
-
-            await Task.Delay(50);
-        }
+        await WaitForConditionAsync(() => !service.IsRunInProgress, TimeSpan.FromSeconds(1));
 
         service.IsRunInProgress.Should().BeFalse();
     }
@@ -250,7 +242,7 @@ public class WeeklyPipelineServiceTests : IDisposable
         service.IsRunInProgress.Should().BeFalse();
 
         var runTask = service.TryRunFullPipelineAsync("test");
-        await Task.Delay(100);
+        await WaitForConditionAsync(() => service.IsRunInProgress, TimeSpan.FromSeconds(1));
 
         service.IsRunInProgress.Should().BeTrue();
 
@@ -359,5 +351,21 @@ public class WeeklyPipelineServiceTests : IDisposable
     public void Dispose()
     {
         // InMemory databases are cleaned up when the last connection closes
+    }
+
+    private static async Task WaitForConditionAsync(Func<bool> predicate, TimeSpan timeout)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < timeout)
+        {
+            if (predicate())
+            {
+                return;
+            }
+
+            await Task.Yield();
+        }
+
+        throw new TimeoutException("Timed out waiting for the pipeline state transition.");
     }
 }
