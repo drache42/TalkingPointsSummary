@@ -1,6 +1,5 @@
 using System.Net.Http.Json;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TalkingPointsSummary.Configuration;
@@ -116,45 +115,4 @@ public class TalkingPointsApiClient : ITalkingPointsApiClient
 
         return apiResponse?.Data?.Messages ?? [];
     }
-}
-
-// --- API Response DTOs ---
-
-public class TalkingPointsApiResponse
-{
-    public TalkingPointsData? Data { get; set; }
-}
-
-public class TalkingPointsData
-{
-    public List<TalkingPointsMessage> Messages { get; set; } = [];
-}
-
-public class TalkingPointsMessage
-{
-    [JsonPropertyName("_id")]
-    public string Id { get; set; } = string.Empty;
-
-    public string? ContactMessageId { get; set; }
-    public string? Text { get; set; }
-    public string? FromName { get; set; }
-    public TalkingPointsFrom? From { get; set; }
-    public TalkingPointsContactInfo? ContactInfo { get; set; }
-    public DateTime? CreatedAt { get; set; }
-    public DateTime? DisplayDate { get; set; }
-}
-
-public class TalkingPointsFrom
-{
-    public TalkingPointsUser? User { get; set; }
-}
-
-public class TalkingPointsUser
-{
-    public string? Signature { get; set; }
-}
-
-public class TalkingPointsContactInfo
-{
-    public string? StudentName { get; set; }
 }

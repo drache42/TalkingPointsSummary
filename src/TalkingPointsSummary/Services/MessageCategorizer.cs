@@ -1,6 +1,5 @@
 using System.Net.Http.Json;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -106,35 +105,4 @@ public partial class MessageCategorizer : IMessageCategorizer
 
     [GeneratedRegex(@"```json|```")]
     private static partial Regex StripCodeFences();
-}
-
-// --- Anthropic API DTOs ---
-
-public class AnthropicResponse
-{
-    public List<AnthropicContent>? Content { get; set; }
-}
-
-public class AnthropicContent
-{
-    public string Type { get; set; } = string.Empty;
-    public string Text { get; set; } = string.Empty;
-}
-
-public class CategorizationJsonResponse
-{
-    [JsonPropertyName("message_id")]
-    public string? MessageId { get; set; }
-
-    [JsonPropertyName("has_newsletter_url")]
-    public bool? HasNewsletterUrl { get; set; }
-
-    [JsonPropertyName("newsletter_url")]
-    public string? NewsletterUrl { get; set; }
-
-    [JsonPropertyName("is_news_itself")]
-    public bool? IsNewsItself { get; set; }
-
-    [JsonPropertyName("summary")]
-    public string? Summary { get; set; }
 }
