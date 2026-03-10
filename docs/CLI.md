@@ -1,58 +1,64 @@
-# CLI Reference
+# CLI reference
 
-The Talking Points Summary app runs in two modes:
+The worker runs in two modes:
 
-1. **Worker mode** (default): Runs as a long-lived service, triggering the pipeline on schedule
-2. **CLI mode**: Executes a command and exits
+- Worker mode with no arguments: start the scheduled background pipeline
+- CLI mode with arguments: execute one command and exit
 
-CLI commands are invoked by passing arguments to the application entry point:
+Invoke commands either from the project directory or from the container:
 
 ```bash
-# Locally
-dotnet run -- <command> [options]
+# Local project run
+dotnet run --project src/TalkingPointsSummary -- <command> [options]
 
-# In Docker
+# Docker Compose container
 docker exec talking-points-summary dotnet TalkingPointsSummary.dll <command> [options]
 ```
 
----
+## Command summary
 
-## Commands
+| Command | Purpose |
+| --- | --- |
+| `add-parent` | Register a parent account and recipient emails |
+| `add-child` | Add a child to an existing parent |
+| `list-parents` | List parents and their children |
+| `remove-parent` | Delete a parent and all associated data |
+| `remove-child` | Delete a child |
+| `run` | Run the full pipeline for all active parents |
+| `check-config` | Validate required settings and external connectivity |
 
-### `add-parent`
+## `add-parent`
 
-Register a new parent account.
+Register a parent account.
 
 ```bash
-add-parent --name <name> --token <token> --contact-id <id> --emails <emails>
+add-parent --name <name> --token <token> --contact-id <contact-id> --emails <email1;email2>
 ```
 
 | Option | Required | Description |
 | --- | --- | --- |
-| `--name` | Yes | Family name (e.g. "ExampleFamily") |
+| `--name` | Yes | Parent or family label stored in the database |
 | `--token` | Yes | TalkingPoints `x-token` header value |
 | `--contact-id` | Yes | TalkingPoints `x-contactid` header value |
-| `--emails` | Yes | Semicolon-delimited recipient email addresses |
+| `--emails` | Yes | Semicolon-delimited recipient list |
 
-**Example:**
+Example:
 
 ```bash
 add-parent \
   --name "ExampleFamily" \
   --token "your-talkingpoints-x-token" \
   --contact-id "your-talkingpoints-x-contactid" \
-  --emails "parent1@gmail.com;parent2@gmail.com"
+  --emails "parent1@example.com;parent2@example.com"
 ```
 
-**Output:**
+Representative output:
 
 ```text
 Added parent 'ExampleFamily' with ID 1
 ```
 
----
-
-### `add-child`
+## `add-child`
 
 Add a child to an existing parent.
 
@@ -62,14 +68,16 @@ add-child --parent-id <id> --name <name> --school <school> --grade <grade> [--ye
 
 | Option | Required | Description |
 | --- | --- | --- |
-| `--parent-id` | Yes | Parent ID (from `add-parent` output or `list-parents`) |
-| `--name` | Yes | Child's name |
+| `--parent-id` | Yes | Parent ID returned by `add-parent` or shown by `list-parents` |
+| `--name` | Yes | Child name |
 | `--school` | Yes | School name |
-| `--grade` | Yes | Starting grade level (0 = Kindergarten, 1 = 1st, etc.) |
-| `--year` | No | School year when the grade applies (e.g. 2025 = 2025-2026 school year). Defaults to the current school year if omitted. |
-| `--emoji` | No | Emoji for summary headings (default: "📚") |
+| `--grade` | Yes | Starting grade, where `0=Kindergarten` and `12=12th Grade` |
+| `--year` | No | Starting school year, for example `2025` for the `2025-2026` school year |
+| `--emoji` | No | Heading emoji stored with the child; defaults to `📚` |
 
-**Example:**
+If you omit `--year`, the service uses the current school year from `GradeCalculator.GetCurrentSchoolYear()`. Dates from September through December use the current calendar year. Dates from January through August use the previous calendar year.
+
+Example:
 
 ```bash
 add-child \
@@ -80,49 +88,42 @@ add-child \
   --emoji "📚"
 ```
 
-**Output:**
+Representative output:
 
 ```text
 Added child 'StudentOne' (ID 1) to parent 'ExampleFamily'
 ```
 
-**Grade reference:**
+## `list-parents`
 
-| Value | Grade |
-| --- | --- |
-| 0 | Kindergarten |
-| 1 | 1st Grade |
-| 2 | 2nd Grade |
-| 3 | 3rd Grade |
-| 4+ | 4th Grade, etc. |
-
-Grades auto-advance every September 1st based on the starting grade and year.
-
----
-
-### `list-parents`
-
-Display all registered parents and their children.
+List all parents and their children.
 
 ```bash
 list-parents
 ```
 
-**Example output:**
+If there are no parents, the command prints:
 
 ```text
-[1] ExampleFamily (active)
-    Emails: parent1@gmail.com;parent2@gmail.com
-    ContactId: your-talkingpoints-x-contactid
-  📚 [1] StudentOne — Sample Elementary — Kindergarten
-  🎓 [2] StudentTwo — Demo Elementary — 3rd Grade
+No parents registered.
 ```
 
----
+Representative output:
 
-### `remove-parent`
+```text
 
-Remove a parent and all associated data (children, messages, news, summaries).
+[1] ExampleFamily (active)
+    Emails: parent1@example.com;parent2@example.com
+    ContactId: your-talkingpoints-x-contactid
+    📚 [1] StudentOne — Sample Elementary — Kindergarten
+    🎓 [2] StudentTwo — Demo Elementary — 3rd Grade
+```
+
+The displayed grade is the current grade label, not the raw starting grade.
+
+## `remove-parent`
+
+Delete a parent and all associated data.
 
 ```bash
 remove-parent --id <id>
@@ -130,27 +131,25 @@ remove-parent --id <id>
 
 | Option | Required | Description |
 | --- | --- | --- |
-| `--id` | Yes | Parent ID to remove |
+| `--id` | Yes | Parent ID to delete |
 
-**Example:**
+Example:
 
 ```bash
 remove-parent --id 1
 ```
 
-**Output:**
+Representative output:
 
 ```text
 Removed parent 'ExampleFamily' (ID 1) and all associated data
 ```
 
-> ⚠️ This is destructive — all messages, news items, and summaries for this parent will be deleted (cascade).
+This command deletes the parent, children, messages, news items, and summaries through EF Core cascade rules.
 
----
+## `remove-child`
 
-### `remove-child`
-
-Remove a single child from a parent.
+Delete a child.
 
 ```bash
 remove-child --id <id>
@@ -158,120 +157,122 @@ remove-child --id <id>
 
 | Option | Required | Description |
 | --- | --- | --- |
-| `--id` | Yes | Child ID to remove |
+| `--id` | Yes | Child ID to delete |
 
-**Example:**
+Example:
 
 ```bash
 remove-child --id 2
 ```
 
-**Output:**
+Representative output:
 
 ```text
 Removed child 'StudentTwo' (ID 2)
 ```
 
----
+If the child ID is unknown, the command prints `Child with ID <id> not found` and exits with code `1`.
 
-### `run`
+## `run`
 
-Manually trigger the full pipeline for all active parents. Useful for testing and initial setup.
+Run the full pipeline for all active parents.
 
 ```bash
 run
 ```
 
-**What it does:**
+The CLI command does not accept `--parent-id`. Parent-scoped manual runs are available through the worker debug endpoint and the admin debug page when debug features are enabled.
 
-1. Fetches messages from TalkingPoints API
-2. Deduplicates and stores new messages
-3. AI-categorizes unprocessed messages (Claude Haiku)
-4. Scrapes newsletter URLs (Browserless)
-5. Stores categorized news items
-6. Generates weekly summary (Claude Sonnet)
-7. Converts Markdown → HTML
-8. Sends email to all recipients
-9. Archives the summary
+What the command does:
 
-**Example:**
+1. Fetch messages from TalkingPoints
+2. Save only new messages
+3. Categorize unprocessed messages with Anthropic Haiku
+4. Scrape newsletter URLs through Browserless when applicable
+5. Save resulting news items
+6. Generate the weekly Markdown summary with Anthropic Sonnet
+7. Convert Markdown to HTML
+8. Send email through SMTP
+9. Archive the summary
+
+Example:
 
 ```bash
 docker exec talking-points-summary dotnet TalkingPointsSummary.dll run
 ```
 
-**Output:**
+Representative output:
 
 ```text
 Starting manual pipeline run...
 Pipeline run complete.
 ```
 
----
+If another run is already in progress, the command prints `A pipeline run is already in progress.` and exits with code `1`.
 
-### `check-config`
+## `check-config`
 
-Verify required configuration and external service connectivity without starting a pipeline run.
+Validate required configuration and connectivity without running the pipeline.
 
 ```bash
 check-config
 ```
 
-**What it does:**
+The command runs the startup validator and reports:
 
-1. Validates required configuration values are present
-2. Checks external service connectivity through `StartupValidator`
-3. Reports pass, warning, and failure results in the console
-4. Returns a non-zero exit code if any required check fails
+1. Required config presence
+2. Database connectivity and migration state
+3. Anthropic API key acceptance
+4. Browserless reachability
+5. SMTP connectivity
+6. TalkingPoints checks for each active parent
 
-**Example:**
+Example:
 
 ```bash
 docker exec talking-points-summary dotnet TalkingPointsSummary.dll check-config
 ```
 
-**Output:**
+Representative output:
 
 ```text
 Checking configuration and connectivity...
 
-✅ PASS  Database            Connected successfully
-✅ PASS  Browserless         Reachable
-⚠️  WARN  SMTP              Using local development SMTP settings
+✅ PASS  Config presence           All required environment variables are set
+✅ PASS  Database connection       Connected; 3 migration(s) applied, schema is up to date
+✅ PASS  Anthropic API key         Key accepted by API (HTTP 400)
+✅ PASS  Browserless reachability  Scrape endpoint responded successfully at http://browserless:3000/scrape
+⚠️  WARN  SMTP connectivity        Connected to localhost:1025 — server does not require authentication (e.g. Mailpit)
+⚠️  WARN  TalkingPoints (parents)  No active parents registered in the database
+
+All checks passed.
 ```
 
----
+Warnings do not fail the command. Any `FAIL` result sets exit code `1`.
 
-## Exit Codes
+## Exit codes
 
 | Code | Meaning |
 | --- | --- |
-| 0 | Success |
-| 1 | Error (e.g. parent/child not found) |
+| `0` | Command succeeded |
+| `1` | Validation failed, an entity was not found, a pipeline run was already in progress, or `check-config` reported at least one failed check |
 
-## Finding TalkingPoints Credentials
+## Finding TalkingPoints credentials
 
-This is usually the hardest part of setup. You need two values from your own authenticated TalkingPoints browser session:
+You need two headers from an authenticated TalkingPoints parent session:
 
 - `x-token`
 - `x-contactid`
 
-Walkthrough:
+To get them:
 
-1. Open [https://families.talkingpts.org/login](https://families.talkingpts.org/login).
-2. Enter the phone number for the parent account you want to summarize.
-3. Complete sign-in with the verification code TalkingPoints sends you.
-4. Once you are signed in, open browser developer tools. `F12` is the usual shortcut.
-5. In developer tools, open the `Network` tab.
-6. Refresh the page after the Network tab is already open.
-7. Click any authenticated TalkingPoints request in the left-hand request list.
-8. In `Headers`, look under `Request Headers`.
-9. Copy the values for `x-token` and `x-contactid`.
+1. Open `https://families.talkingpts.org/login`.
+2. Sign in to the parent account you want to summarize.
+3. Open browser developer tools.
+4. Open the `Network` tab and refresh the page.
+5. Select any authenticated TalkingPoints API request.
+6. Open `Headers` and copy `x-token` and `x-contactid` from `Request Headers`.
 
 ![TalkingPoints request headers in browser dev tools](images/talkingpoints-devtools-request-headers.png)
 
-Notes:
-
-- The exact request name is not important as long as it is a logged-in TalkingPoints API request.
-- If the list is empty or missing the headers, refresh again after sign-in completes.
-- Treat these values like credentials and keep them out of source control.
+Keep both values out of source control.
