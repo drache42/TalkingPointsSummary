@@ -131,7 +131,7 @@ public class TalkingPointsApiClientTests
                         text = "Hello parents!",
                         fromName = "Ms. Smith",
                         from = new { user = new { signature = "Ms. Jane Smith" } },
-                        contactInfo = new { studentName = "Clara" },
+                        contactInfo = new { studentName = "StudentOne" },
                         createdAt = "2026-03-01T10:00:00Z",
                         displayDate = "2026-03-01T10:30:00Z"
                     }
@@ -147,7 +147,7 @@ public class TalkingPointsApiClientTests
         result.Should().HaveCount(1);
         result[0].Id.Should().Be("msg-001");
         result[0].Text.Should().Be("Hello parents!");
-        result[0].ContactInfo!.StudentName.Should().Be("Clara");
+        result[0].ContactInfo!.StudentName.Should().Be("StudentOne");
         result[0].From!.User!.Signature.Should().Be("Ms. Jane Smith");
     }
 

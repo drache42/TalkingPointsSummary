@@ -46,7 +46,7 @@ public class MessageDeduplicatorTests : IDisposable
                 Id = "msg-001",
                 Text = "Hello parents!",
                 FromName = "Teacher",
-                ContactInfo = new TalkingPointsContactInfo { StudentName = "Clara" },
+                ContactInfo = new TalkingPointsContactInfo { StudentName = "StudentOne" },
                 DisplayDate = DateTime.UtcNow
             }
         };
@@ -212,7 +212,7 @@ public class MessageDeduplicatorTests : IDisposable
                 Text = "Hello parents!",
                 FromName = "Direct FromName",
                 From = new TalkingPointsFrom { User = new TalkingPointsUser { Signature = "Ms. Jane Smith" } },
-                ContactInfo = new TalkingPointsContactInfo { StudentName = "Clara" },
+                ContactInfo = new TalkingPointsContactInfo { StudentName = "StudentOne" },
                 ContactMessageId = "contact-123",
                 DisplayDate = new DateTime(2026, 3, 7, 10, 0, 0, DateTimeKind.Utc)
             }
@@ -222,7 +222,7 @@ public class MessageDeduplicatorTests : IDisposable
 
         result.Should().HaveCount(1);
         var saved = result[0];
-        saved.StudentName.Should().Be("Clara");
+        saved.StudentName.Should().Be("StudentOne");
         saved.FromName.Should().Be("Ms. Jane Smith"); // Signature takes precedence over FromName
         saved.MessageText.Should().Be("Hello parents!");
         saved.ExternalMessageId.Should().Be("msg-fields");

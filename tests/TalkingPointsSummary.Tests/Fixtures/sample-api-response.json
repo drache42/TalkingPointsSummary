@@ -12,7 +12,7 @@
           }
         },
         "contactInfo": {
-          "studentName": "Clara Froehlich"
+          "studentName": "StudentOne ExampleFamily"
         },
         "createdAt": "2026-03-01T10:00:00.000Z",
         "displayDate": "2026-03-01T10:30:00.000Z"
@@ -20,7 +20,7 @@
       {
         "_id": "msg-test-002",
         "contactMessageId": "contact-002",
-        "text": "Weekly Newsletter: https://www.smore.com/abc123-cascadia-weekly",
+        "text": "Weekly Newsletter: https://www.smore.com/abc123-demo-weekly",
         "fromName": "Mr. Johnson",
         "from": {
           "user": {
@@ -28,7 +28,7 @@
           }
         },
         "contactInfo": {
-          "studentName": "Nolan Froehlich"
+          "studentName": "StudentTwo ExampleFamily"
         },
         "createdAt": "2026-02-28T14:00:00.000Z",
         "displayDate": "2026-02-28T14:15:00.000Z"
@@ -44,7 +44,7 @@
           }
         },
         "contactInfo": {
-          "studentName": "Clara Froehlich"
+          "studentName": "StudentOne ExampleFamily"
         },
         "createdAt": "2026-02-27T09:00:00.000Z",
         "displayDate": "2026-02-27T09:00:00.000Z"

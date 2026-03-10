@@ -2,6 +2,8 @@
 
 The solution uses [.NET Aspire](https://learn.microsoft.com/en-us/dotnet/aspire/get-started/aspire-overview) to orchestrate local dependencies. Pressing F5 launches the `TalkingPointsSummary.AppHost` project, which starts PostgreSQL in Docker and then starts the Worker Service with the correct connection string injected automatically.
 
+The admin UI and debug endpoints are intentional development features in this open-source repository. They are designed for contributors to inspect state and manually trigger workflows while developing locally.
+
 ## Prerequisites
 
 - Docker Desktop installed and running
@@ -12,8 +14,12 @@ The solution uses [.NET Aspire](https://learn.microsoft.com/en-us/dotnet/aspire/
 Set `TalkingPointsSummary.AppHost` as the startup project in Visual Studio, then press **F5**.
 
 - PostgreSQL starts in Docker, waits until healthy, then the Worker Service starts
+- Browserless and Mailpit start when they are managed by the AppHost
+- The Admin UI starts alongside the worker
 - The Aspire dashboard opens in your browser showing logs and resource health
 - Stopping the debugger shuts the container down
+
+When `DebugFeatures` is enabled, contributors can use the Admin Debug page together with the worker debug endpoint to trigger and observe local pipeline runs.
 
 ## Using an External PostgreSQL (Different Machine Setup)
 
@@ -29,6 +35,7 @@ If you have your own PostgreSQL instance (local install, remote server, cloud), 
 ```
 
 To use user secrets:
+
 ```bash
 cd src/TalkingPointsSummary.AppHost
 dotnet user-secrets set ManagePostgres false

@@ -1,10 +1,10 @@
 # Talking Points Summary
 
-A .NET 10 Worker Service that automatically fetches school messages
+A .NET 10 weekly-digest system with a worker service, a Blazor admin UI, and an Aspire AppHost for local orchestration.
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                    Weekly Pipeline (Monday 8 AM)            │
 │                                                             │
@@ -31,16 +31,24 @@ A .NET 10 Worker Service that automatically fetches school messages
 - **Gmail SMTP credentials** (or other SMTP provider)
 - **TalkingPoints account** (parent credentials)
 
+## Repository Shape
+
+- `src/TalkingPointsSummary`: worker service and CLI
+- `src/TalkingPointsSummary.Admin`: Blazor Server admin UI
+- `src/TalkingPointsSummary.AppHost`: .NET Aspire local-development orchestrator
+
+The admin UI and debug tooling are intentional open-source development features. They exist to help contributors inspect data, validate configuration, and manually exercise the pipeline during local development.
+
 ## Application Configuration
 
 The worker uses standard hierarchical .NET configuration sections.
 
 | Setting | Environment Variable Equivalent | Description |
-|---|---|---|
+| --- | --- | --- |
 | `ConnectionStrings:TalkingPoints` | `ConnectionStrings__TalkingPoints` | PostgreSQL connection string |
 | `Anthropic:ApiKey` | `Anthropic__ApiKey` | Anthropic API key for Claude |
 | `Browserless:BaseUrl` | `Browserless__BaseUrl` | Browserless base URL |
-| `DebugFeatures:Enabled` | `DebugFeatures__Enabled` | Enables the Admin Debug page and worker debug trigger endpoint |
+| `DebugFeatures:Enabled` | `DebugFeatures__Enabled` | Enables the public development-only debug tools, including the Admin Debug page and worker debug trigger endpoint |
 | `NewsletterScrapingSecurity:Enabled` | `NewsletterScrapingSecurity__Enabled` | Enables newsletter URL validation before Browserless fetches a page |
 | `NewsletterScrapingSecurity:RequireHttps` | `NewsletterScrapingSecurity__RequireHttps` | Requires HTTPS for newsletter URLs except for explicitly allowed HTTP hosts |
 | `TalkingPointsApi:MaxPagesPerRun` | `TalkingPointsApi__MaxPagesPerRun` | Safety cap on how many TalkingPoints feed pages one pipeline run may fetch |
@@ -54,7 +62,15 @@ The worker uses standard hierarchical .NET configuration sections.
 
 `appsettings.Local.json` is still loaded if present and should use the same nested JSON structure as `appsettings.json`. For local development, user secrets are the preferred place for secrets.
 
+If you prefer environment variables, use the section-based names shown above. [.env.example](.env.example) includes both Docker Compose overrides and direct worker environment variable examples.
+
 ## Quick Start
+
+Choose one local workflow:
+
+- Docker Compose: fastest way to run the full containerized stack
+- Aspire AppHost: best option for F5 debugging and local dependency orchestration
+- Worker only: useful when you already have PostgreSQL and Browserless running elsewhere
 
 ### 1. Clone and configure
 
@@ -74,7 +90,7 @@ dotnet user-secrets set "Smtp:FromEmail" "you@example.com"
 
 Set `Smtp:Username` and `Smtp:Password` only if your SMTP server requires authentication. `appsettings.Development.json` already defaults to `localhost:1025` for Mailpit-style local SMTP.
 
-Set `DebugFeatures__Enabled=true` when you want the Admin Debug page and worker debug trigger endpoint available. Leave it unset or `false` to disable them.
+Set `DebugFeatures__Enabled=true` when you want the public development-only debug tools available. That enables the Admin Debug page and the worker debug trigger endpoint. Leave it unset or `false` to disable them.
 
 Newsletter scraping now validates AI-supplied URLs before sending them to Browserless. By default only public HTTPS URLs are allowed. Development and test environments can opt specific hosts into `AllowedHosts` and `AllowHttpHosts` when Browserless must scrape host-served content such as `host.docker.internal`.
 
@@ -87,6 +103,16 @@ Outgoing HTTP calls now use the Microsoft resilience handler package with expone
 ```bash
 docker compose up -d --build
 ```
+
+This starts:
+
+- the worker service
+- the admin UI at `http://localhost:5100`
+- Mailpit at `http://localhost:8025`
+- Browserless at `http://localhost:3000`
+- PostgreSQL at `localhost:5432`
+
+If `DEBUG_FEATURES_ENABLED=true`, the admin UI also exposes the development Debug page and the worker accepts manual debug-trigger requests.
 
 `docker-compose.yml` defaults `DebugFeatures__Enabled` to `false`. Set `DEBUG_FEATURES_ENABLED=true` before starting the stack if you want the debug tools enabled.
 
@@ -116,7 +142,7 @@ volumes:
 # Add a parent
 docker exec talking-points-summary \
   dotnet TalkingPointsSummary.dll add-parent \
-  --name "Froehlich" \
+  --name "ExampleFamily" \
   --token "your-talkingpoints-x-token" \
   --contact-id "your-talkingpoints-x-contactid" \
   --emails "parent1@email.com;parent2@email.com"
@@ -125,21 +151,28 @@ docker exec talking-points-summary \
 docker exec talking-points-summary \
   dotnet TalkingPointsSummary.dll add-child \
   --parent-id 1 \
-  --name "Clara" \
-  --school "James Baldwin Elementary" \
+  --name "StudentOne" \
+  --school "Sample Elementary" \
   --grade 0 \
   --emoji "📚"
 
 docker exec talking-points-summary \
   dotnet TalkingPointsSummary.dll add-child \
   --parent-id 1 \
-  --name "Nolan" \
-  --school "Cascadia Elementary" \
+  --name "StudentTwo" \
+  --school "Demo Elementary" \
   --grade 3 \
   --emoji "🎓"
 ```
 
 ### 4. Test with a manual run
+
+Before running the pipeline manually, you can validate configuration and external connectivity:
+
+```bash
+docker exec talking-points-summary \
+  dotnet TalkingPointsSummary.dll check-config
+```
 
 ```bash
 docker exec talking-points-summary \
@@ -148,7 +181,7 @@ docker exec talking-points-summary \
 
 ### 5. Verify
 
-Check your email for the weekly summary. The service will now automatically run every Monday at 8 AM UTC.
+Use the admin UI at `http://localhost:5100` to inspect configured parents and children, and use Mailpit at `http://localhost:8025` to inspect delivered email locally. When debug features are enabled, the admin UI also exposes a Debug page for contributor workflows such as triggering manual runs. The service will automatically run every Monday at 8 AM UTC.
 
 ## Local Development
 
@@ -157,7 +190,9 @@ Check your email for the weekly summary. The service will now automatically run 
 The solution uses [.NET Aspire](https://learn.microsoft.com/en-us/dotnet/aspire/get-started/aspire-overview) to orchestrate local dependencies. Set `TalkingPointsSummary.AppHost` as the startup project and press **F5**:
 
 - PostgreSQL starts automatically in Docker, waits until healthy
+- Browserless and Mailpit start automatically when managed locally
 - Worker Service starts with the connection string injected
+- Admin UI starts with the same database reference
 - Aspire dashboard opens showing logs and resource health
 - Stopping the debugger shuts the container down
 
@@ -196,12 +231,14 @@ docker-compose down
 
 For direct local runs, configure the worker through user secrets or environment variables using the section-based names shown above.
 
+The admin UI can also be run directly from `src/TalkingPointsSummary.Admin` once the database is available.
+
 ## Database Schema
 
 The app uses EF Core with code-first migrations, auto-applied on startup.
 
 | Table | Purpose |
-|---|---|
+| --- | --- |
 | `Parents` | Registered parent accounts with TalkingPoints credentials |
 | `Children` | Children linked to parents, with school and grade info |
 | `Messages` | Raw messages fetched from TalkingPoints API |
@@ -224,6 +261,7 @@ The app uses EF Core with code-first migrations, auto-applied on startup.
 ## Grade Calculation
 
 Children advance one grade every September 1st. Configure the starting grade and year when adding a child:
+
 - Grade 0 = Kindergarten
 - Grade 1 = 1st Grade, etc.
 

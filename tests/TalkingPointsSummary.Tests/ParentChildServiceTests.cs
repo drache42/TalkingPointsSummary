@@ -20,12 +20,12 @@ public class ParentChildServiceTests
 
         var parent = await service.CreateParentAsync(
             new CreateParentRequest(
-                "  Froehlich Family  ",
+                "  Example Family  ",
                 "  token-123  ",
                 "  contact-456  ",
                 " one@example.com ; two@example.com ; "));
 
-        parent.Name.Should().Be("Froehlich Family");
+        parent.Name.Should().Be("Example Family");
         parent.TalkingPointsToken.Should().Be("token-123");
         parent.TalkingPointsContactId.Should().Be("contact-456");
         parent.EmailRecipients.Should().Be("one@example.com;two@example.com");
@@ -66,7 +66,7 @@ public class ParentChildServiceTests
 
         var child = await service.CreateChildAsync(
             parent.Id,
-            new CreateChildRequest("Clara", "Elementary", 0, null, null));
+            new CreateChildRequest("StudentOne", "Sample Elementary", 0, null, null));
 
         child.StartingYear.Should().Be(FixedGradeCalculator.GetCurrentSchoolYear(FixedUtcNow.UtcDateTime));
         child.Emoji.Should().Be("📚");
@@ -80,7 +80,7 @@ public class ParentChildServiceTests
 
         var act = () => service.CreateChildAsync(
             999,
-            new CreateChildRequest("Clara", "Elementary", 0, null, "📚"));
+            new CreateChildRequest("StudentOne", "Sample Elementary", 0, null, "📚"));
 
         await act.Should().ThrowAsync<EntityNotFoundException>()
             .WithMessage("*Parent with ID 999 was not found.*");
@@ -104,7 +104,7 @@ public class ParentChildServiceTests
 
         var act = () => service.CreateChildAsync(
             parent.Id,
-            new CreateChildRequest("Clara", "Elementary", 13, null, "📚"));
+            new CreateChildRequest("StudentOne", "Sample Elementary", 13, null, "📚"));
 
         await act.Should().ThrowAsync<ValidationException>()
             .WithMessage("Grade must be between 0 and 12.");
@@ -124,8 +124,8 @@ public class ParentChildServiceTests
         var child = new Child
         {
             Parent = parent,
-            Name = "Clara",
-            School = "Elementary",
+            Name = "StudentOne",
+            School = "Sample Elementary",
             StartingGrade = 0,
             StartingYear = 2025,
             Emoji = "📚"
@@ -139,7 +139,7 @@ public class ParentChildServiceTests
         var updatedChild = await service.UpdateChildAsync(
             parent.Id,
             child.Id,
-            new UpdateChildRequest("Clara", "Elementary", 1, 2024, "🎓"));
+            new UpdateChildRequest("StudentOne", "Sample Elementary", 1, 2024, "🎓"));
 
         updatedChild.StartingYear.Should().Be(2024);
         updatedChild.StartingGrade.Should().Be(1);
@@ -160,8 +160,8 @@ public class ParentChildServiceTests
             [
                 new Child
                 {
-                    Name = "Clara",
-                    School = "Elementary",
+                    Name = "StudentOne",
+                    School = "Sample Elementary",
                     StartingGrade = 0,
                     StartingYear = 2025,
                     Emoji = "📚"

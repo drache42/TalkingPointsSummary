@@ -38,62 +38,62 @@ public class GradeCalculatorTests
     }
 
     [Fact]
-    public void GetCurrentGradeLabel_ClaraFroehlich_March2026_IsKindergarten()
+    public void GetCurrentGradeLabel_StudentOneExampleFamily_March2026_IsKindergarten()
     {
-        var clara = new Child
+        var student = new Child
         {
-            Name = "Clara Froehlich",
-            School = "James Baldwin Elementary",
+            Name = "StudentOne ExampleFamily",
+            School = "Sample Elementary",
             StartingGrade = 0,
             StartingYear = 2025
         };
 
-        var result = _gradeCalculator.GetCurrentGradeLabel(clara, new DateTime(2026, 3, 1));
+        var result = _gradeCalculator.GetCurrentGradeLabel(student, new DateTime(2026, 3, 1));
         result.Should().Be("Kindergarten");
     }
 
     [Fact]
-    public void GetCurrentGradeLabel_NolanFroehlich_March2026_Is3rdGrade()
+    public void GetCurrentGradeLabel_StudentTwoExampleFamily_March2026_Is3rdGrade()
     {
-        var nolan = new Child
+        var student = new Child
         {
-            Name = "Nolan Froehlich",
-            School = "Cascadia Elementary",
+            Name = "StudentTwo ExampleFamily",
+            School = "Demo Elementary",
             StartingGrade = 3,
             StartingYear = 2025
         };
 
-        var result = _gradeCalculator.GetCurrentGradeLabel(nolan, new DateTime(2026, 3, 1));
+        var result = _gradeCalculator.GetCurrentGradeLabel(student, new DateTime(2026, 3, 1));
         result.Should().Be("3rd Grade");
     }
 
     [Fact]
-    public void GetCurrentGradeLabel_ClaraFroehlich_October2026_Is1stGrade()
+    public void GetCurrentGradeLabel_StudentOneExampleFamily_October2026_Is1stGrade()
     {
-        var clara = new Child
+        var student = new Child
         {
-            Name = "Clara Froehlich",
-            School = "James Baldwin Elementary",
+            Name = "StudentOne ExampleFamily",
+            School = "Sample Elementary",
             StartingGrade = 0,
             StartingYear = 2025
         };
 
-        var result = _gradeCalculator.GetCurrentGradeLabel(clara, new DateTime(2026, 10, 1));
+        var result = _gradeCalculator.GetCurrentGradeLabel(student, new DateTime(2026, 10, 1));
         result.Should().Be("1st Grade");
     }
 
     [Fact]
-    public void GetCurrentGradeLabel_NolanFroehlich_October2026_Is4thGrade()
+    public void GetCurrentGradeLabel_StudentTwoExampleFamily_October2026_Is4thGrade()
     {
-        var nolan = new Child
+        var student = new Child
         {
-            Name = "Nolan Froehlich",
-            School = "Cascadia Elementary",
+            Name = "StudentTwo ExampleFamily",
+            School = "Demo Elementary",
             StartingGrade = 3,
             StartingYear = 2025
         };
 
-        var result = _gradeCalculator.GetCurrentGradeLabel(nolan, new DateTime(2026, 10, 1));
+        var result = _gradeCalculator.GetCurrentGradeLabel(student, new DateTime(2026, 10, 1));
         result.Should().Be("4th Grade");
     }
 }

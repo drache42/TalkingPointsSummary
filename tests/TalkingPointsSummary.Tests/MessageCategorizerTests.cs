@@ -19,7 +19,7 @@ public class MessageCategorizerTests
         ParentId = 1,
         ExternalMessageId = "msg-001",
         FromName = "Ms. Smith",
-        StudentName = "Clara",
+        StudentName = "StudentOne",
         MessageText = "Here is the newsletter",
         SentAt = new DateTime(2026, 3, 7, 10, 0, 0, DateTimeKind.Utc)
     };

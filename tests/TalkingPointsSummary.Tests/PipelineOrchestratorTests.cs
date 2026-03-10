@@ -141,7 +141,7 @@ public class PipelineOrchestratorTests : IDisposable
     {
         var messages = await SeedUnprocessedMessagesAsync(
             new Message { ExternalMessageId = "msg-fail", FromName = "Teacher A", MessageText = "Fail", SentAt = DateTime.UtcNow },
-            new Message { ExternalMessageId = "msg-ok", FromName = "Teacher B", MessageText = "OK", StudentName = "Clara", SentAt = DateTime.UtcNow });
+            new Message { ExternalMessageId = "msg-ok", FromName = "Teacher B", MessageText = "OK", StudentName = "StudentOne", SentAt = DateTime.UtcNow });
 
         _mockDeduplicator.Setup(x => x.GetUnprocessedAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(messages);
@@ -176,7 +176,7 @@ public class PipelineOrchestratorTests : IDisposable
         {
             ExternalMessageId = "msg-001",
             FromName = "Teacher",
-            StudentName = "Clara",
+            StudentName = "StudentOne",
             MessageText = "Check newsletter",
             SentAt = new DateTime(2026, 3, 7, 10, 0, 0, DateTimeKind.Utc)
         });
@@ -206,7 +206,7 @@ public class PipelineOrchestratorTests : IDisposable
         savedItem.SourceType.Should().Be(SourceType.NewsletterUrl);
         savedItem.NewsContent.Should().Be("Scraped newsletter content");
         savedItem.NewsletterUrl.Should().Be("https://www.smore.com/abc");
-        savedItem.StudentName.Should().Be("Clara");
+        savedItem.StudentName.Should().Be("StudentOne");
         savedItem.FromName.Should().Be("Teacher");
         savedItem.AnalyzedAt.Should().Be(FixedUtcNow.UtcDateTime);
         savedItem.CreatedAt.Should().Be(FixedUtcNow.UtcDateTime);
@@ -219,7 +219,7 @@ public class PipelineOrchestratorTests : IDisposable
         {
             ExternalMessageId = "msg-001",
             FromName = "Teacher",
-            StudentName = "Clara",
+            StudentName = "StudentOne",
             MessageText = "Original message text",
             SentAt = DateTime.UtcNow
         });
@@ -258,7 +258,7 @@ public class PipelineOrchestratorTests : IDisposable
         {
             ExternalMessageId = "msg-001",
             FromName = "Teacher",
-            StudentName = "Clara",
+            StudentName = "StudentOne",
             MessageText = "Picture day is Friday",
             SentAt = DateTime.UtcNow
         });
@@ -292,7 +292,7 @@ public class PipelineOrchestratorTests : IDisposable
         {
             ExternalMessageId = "msg-both",
             FromName = "Teacher",
-            StudentName = "Clara",
+            StudentName = "StudentOne",
             MessageText = "Picture day is Friday. Full details in the newsletter.",
             SentAt = DateTime.UtcNow
         });

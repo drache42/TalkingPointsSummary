@@ -28,8 +28,8 @@ add-parent --name <name> --token <token> --contact-id <id> --emails <emails>
 ```
 
 | Option | Required | Description |
-|---|---|---|
-| `--name` | Yes | Family name (e.g. "Froehlich") |
+| --- | --- | --- |
+| `--name` | Yes | Family name (e.g. "ExampleFamily") |
 | `--token` | Yes | TalkingPoints `x-token` header value |
 | `--contact-id` | Yes | TalkingPoints `x-contactid` header value |
 | `--emails` | Yes | Semicolon-delimited recipient email addresses |
@@ -38,7 +38,7 @@ add-parent --name <name> --token <token> --contact-id <id> --emails <emails>
 
 ```bash
 add-parent \
-  --name "Froehlich" \
+  --name "ExampleFamily" \
   --token "your-talkingpoints-x-token" \
   --contact-id "your-talkingpoints-x-contactid" \
   --emails "parent1@gmail.com;parent2@gmail.com"
@@ -46,8 +46,8 @@ add-parent \
 
 **Output:**
 
-```
-Added parent 'Froehlich' with ID 1
+```text
+Added parent 'ExampleFamily' with ID 1
 ```
 
 ---
@@ -61,7 +61,7 @@ add-child --parent-id <id> --name <name> --school <school> --grade <grade> [--ye
 ```
 
 | Option | Required | Description |
-|---|---|---|
+| --- | --- | --- |
 | `--parent-id` | Yes | Parent ID (from `add-parent` output or `list-parents`) |
 | `--name` | Yes | Child's name |
 | `--school` | Yes | School name |
@@ -74,22 +74,22 @@ add-child --parent-id <id> --name <name> --school <school> --grade <grade> [--ye
 ```bash
 add-child \
   --parent-id 1 \
-  --name "Clara" \
-  --school "James Baldwin Elementary" \
+  --name "StudentOne" \
+  --school "Sample Elementary" \
   --grade 0 \
   --emoji "📚"
 ```
 
 **Output:**
 
-```
-Added child 'Clara' (ID 1) to parent 'Froehlich'
+```text
+Added child 'StudentOne' (ID 1) to parent 'ExampleFamily'
 ```
 
 **Grade reference:**
 
 | Value | Grade |
-|---|---|
+| --- | --- |
 | 0 | Kindergarten |
 | 1 | 1st Grade |
 | 2 | 2nd Grade |
@@ -110,12 +110,12 @@ list-parents
 
 **Example output:**
 
-```
-[1] Froehlich (active)
+```text
+[1] ExampleFamily (active)
     Emails: parent1@gmail.com;parent2@gmail.com
     ContactId: your-talkingpoints-x-contactid
-    📚 [1] Clara — James Baldwin Elementary — Kindergarten
-    🎓 [2] Nolan — Cascadia Elementary — 3rd Grade
+  📚 [1] StudentOne — Sample Elementary — Kindergarten
+  🎓 [2] StudentTwo — Demo Elementary — 3rd Grade
 ```
 
 ---
@@ -129,7 +129,7 @@ remove-parent --id <id>
 ```
 
 | Option | Required | Description |
-|---|---|---|
+| --- | --- | --- |
 | `--id` | Yes | Parent ID to remove |
 
 **Example:**
@@ -140,8 +140,8 @@ remove-parent --id 1
 
 **Output:**
 
-```
-Removed parent 'Froehlich' (ID 1) and all associated data
+```text
+Removed parent 'ExampleFamily' (ID 1) and all associated data
 ```
 
 > ⚠️ This is destructive — all messages, news items, and summaries for this parent will be deleted (cascade).
@@ -157,7 +157,7 @@ remove-child --id <id>
 ```
 
 | Option | Required | Description |
-|---|---|---|
+| --- | --- | --- |
 | `--id` | Yes | Child ID to remove |
 
 **Example:**
@@ -168,8 +168,8 @@ remove-child --id 2
 
 **Output:**
 
-```
-Removed child 'Nolan' (ID 2)
+```text
+Removed child 'StudentTwo' (ID 2)
 ```
 
 ---
@@ -202,9 +202,42 @@ docker exec talking-points-summary dotnet TalkingPointsSummary.dll run
 
 **Output:**
 
-```
+```text
 Starting manual pipeline run...
 Pipeline run complete.
+```
+
+---
+
+### `check-config`
+
+Verify required configuration and external service connectivity without starting a pipeline run.
+
+```bash
+check-config
+```
+
+**What it does:**
+
+1. Validates required configuration values are present
+2. Checks external service connectivity through `StartupValidator`
+3. Reports pass, warning, and failure results in the console
+4. Returns a non-zero exit code if any required check fails
+
+**Example:**
+
+```bash
+docker exec talking-points-summary dotnet TalkingPointsSummary.dll check-config
+```
+
+**Output:**
+
+```text
+Checking configuration and connectivity...
+
+✅ PASS  Database            Connected successfully
+✅ PASS  Browserless         Reachable
+⚠️  WARN  SMTP              Using local development SMTP settings
 ```
 
 ---
@@ -212,7 +245,7 @@ Pipeline run complete.
 ## Exit Codes
 
 | Code | Meaning |
-|---|---|
+| --- | --- |
 | 0 | Success |
 | 1 | Error (e.g. parent/child not found) |
 
