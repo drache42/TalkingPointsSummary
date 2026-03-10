@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using TalkingPointsSummary.Data;
 using TalkingPointsSummary.Models;
@@ -115,86 +116,116 @@ public class PipelineOrchestrator
         {
             // AI categorization
             var result = await _categorizer.CategorizeAsync(message, ct);
+            var itemsToPersist = await BuildNewsItemsAsync(parent, message, result, ct);
 
-            // Route: newsletter URL → scrape and save
-            if (result.HasNewsletterUrl && !string.IsNullOrWhiteSpace(result.NewsletterUrl))
-            {
-                var scrapedText = await _scraper.ScrapeAsync(result.NewsletterUrl, ct);
-
-                if (!string.IsNullOrWhiteSpace(scrapedText))
-                {
-                    var newsItem = new NewsItem
-                    {
-                        ParentId = parent.Id,
-                        SourceMessageId = message.ExternalMessageId,
-                        SourceType = SourceType.NewsletterUrl,
-                        NewsletterUrl = result.NewsletterUrl,
-                        NewsContent = scrapedText,
-                        AiSummary = result.Summary,
-                        FromName = message.FromName,
-                        StudentName = message.StudentName,
-                        SentAt = message.SentAt,
-                        AnalyzedAt = DateTime.UtcNow,
-                        CreatedAt = DateTime.UtcNow
-                    };
-                    _db.NewsItems.Add(newsItem);
-                    await _db.SaveChangesAsync(ct);
-                    _logger.LogInformation("Saved newsletter news item for message {MessageId}", message.ExternalMessageId);
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "Scraper returned empty for URL {NewsletterUrl} (message {MessageId}); saving message text as fallback",
-                        result.NewsletterUrl, message.ExternalMessageId);
-
-                    var fallbackItem = new NewsItem
-                    {
-                        ParentId = parent.Id,
-                        SourceMessageId = message.ExternalMessageId,
-                        SourceType = SourceType.MessageText,
-                        NewsletterUrl = result.NewsletterUrl,
-                        NewsContent = message.MessageText,
-                        AiSummary = result.Summary,
-                        FromName = message.FromName,
-                        StudentName = message.StudentName,
-                        SentAt = message.SentAt,
-                        AnalyzedAt = DateTime.UtcNow,
-                        CreatedAt = DateTime.UtcNow
-                    };
-                    _db.NewsItems.Add(fallbackItem);
-                    await _db.SaveChangesAsync(ct);
-                    _logger.LogInformation("Saved fallback news item for message {MessageId}", message.ExternalMessageId);
-                }
-            }
-
-            // Route: direct news → save message text as news
-            if (result.IsNewsItself)
-            {
-                var newsItem = new NewsItem
-                {
-                    ParentId = parent.Id,
-                    SourceMessageId = message.ExternalMessageId,
-                    SourceType = SourceType.MessageText,
-                    NewsContent = message.MessageText,
-                    AiSummary = result.Summary,
-                    FromName = message.FromName,
-                    StudentName = message.StudentName,
-                    SentAt = message.SentAt,
-                    AnalyzedAt = DateTime.UtcNow,
-                    CreatedAt = DateTime.UtcNow
-                };
-                _db.NewsItems.Add(newsItem);
-                await _db.SaveChangesAsync(ct);
-                _logger.LogInformation("Saved direct news item for message {MessageId}", message.ExternalMessageId);
-            }
-
-            // Mark message as processed
-            await _deduplicator.MarkProcessedAsync(message, ct);
+            await PersistMessageProcessingAsync(parent, message, itemsToPersist, ct);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to process message {MessageId}", message.ExternalMessageId);
             // Continue processing other messages
         }
+    }
+
+    private async Task<List<NewsItem>> BuildNewsItemsAsync(
+        Parent parent,
+        Message message,
+        CategorizationResult result,
+        CancellationToken ct)
+    {
+        var itemsByType = new Dictionary<SourceType, NewsItem>();
+
+        // Route: newsletter URL → scrape and save
+        if (result.HasNewsletterUrl && !string.IsNullOrWhiteSpace(result.NewsletterUrl))
+        {
+            var scrapedText = await _scraper.ScrapeAsync(result.NewsletterUrl, ct);
+
+            if (!string.IsNullOrWhiteSpace(scrapedText))
+            {
+                itemsByType[SourceType.NewsletterUrl] = CreateNewsItem(
+                    parent,
+                    message,
+                    SourceType.NewsletterUrl,
+                    scrapedText,
+                    result.Summary,
+                    result.NewsletterUrl);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Scraper returned empty for URL {NewsletterUrl} (message {MessageId}); saving message text as fallback",
+                    result.NewsletterUrl, message.ExternalMessageId);
+
+                itemsByType[SourceType.MessageText] = CreateNewsItem(
+                    parent,
+                    message,
+                    SourceType.MessageText,
+                    message.MessageText,
+                    result.Summary,
+                    result.NewsletterUrl);
+            }
+        }
+
+        // Route: direct news → save message text as news
+        if (result.IsNewsItself && !itemsByType.ContainsKey(SourceType.MessageText))
+        {
+            itemsByType[SourceType.MessageText] = CreateNewsItem(
+                parent,
+                message,
+                SourceType.MessageText,
+                message.MessageText,
+                result.Summary,
+                newsletterUrl: null);
+        }
+
+        return itemsByType.Values.ToList();
+    }
+
+    private async Task PersistMessageProcessingAsync(
+        Parent parent,
+        Message message,
+        IReadOnlyCollection<NewsItem> itemsToPersist,
+        CancellationToken ct)
+    {
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+
+        var existingTypes = await _db.NewsItems
+            .Where(newsItem => newsItem.ParentId == parent.Id && newsItem.SourceMessageId == message.ExternalMessageId)
+            .Select(newsItem => newsItem.SourceType)
+            .ToListAsync(ct);
+
+        foreach (var newsItem in itemsToPersist.Where(newsItem => !existingTypes.Contains(newsItem.SourceType)))
+        {
+            _db.NewsItems.Add(newsItem);
+            _logger.LogInformation("Saved {SourceType} news item for message {MessageId}", newsItem.SourceType, message.ExternalMessageId);
+        }
+
+        message.ProcessedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+    }
+
+    private static NewsItem CreateNewsItem(
+        Parent parent,
+        Message message,
+        SourceType sourceType,
+        string newsContent,
+        string aiSummary,
+        string? newsletterUrl)
+    {
+        return new NewsItem
+        {
+            ParentId = parent.Id,
+            SourceMessageId = message.ExternalMessageId,
+            SourceType = sourceType,
+            NewsletterUrl = newsletterUrl,
+            NewsContent = newsContent,
+            AiSummary = aiSummary,
+            FromName = message.FromName,
+            StudentName = message.StudentName,
+            SentAt = message.SentAt,
+            AnalyzedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow
+        };
     }
 }

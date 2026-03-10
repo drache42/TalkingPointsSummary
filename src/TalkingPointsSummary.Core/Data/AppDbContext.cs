@@ -58,6 +58,7 @@ public class AppDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.SourceMessageId).IsRequired().HasMaxLength(100);
             entity.Property(e => e.SourceType).IsRequired().HasConversion<string>().HasMaxLength(50);
+            entity.HasIndex(e => new { e.ParentId, e.SourceMessageId, e.SourceType }).IsUnique();
             entity.Property(e => e.NewsletterUrl).HasMaxLength(2000);
             entity.Property(e => e.FromName).HasMaxLength(200);
             entity.Property(e => e.StudentName).HasMaxLength(200);

@@ -169,7 +169,7 @@ public class IntegrationTestFixture : IAsyncLifetime
     /// <summary>
     /// Creates a configured IServiceProvider wired to the test containers.
     /// </summary>
-    public ServiceProvider CreateServiceProvider()
+    public ServiceProvider CreateServiceProvider(Action<IServiceCollection>? configureServices = null)
     {
         var services = new ServiceCollection();
 
@@ -223,6 +223,8 @@ public class IntegrationTestFixture : IAsyncLifetime
         services.AddScoped<IEmailSender, EmailSender>();
         services.AddScoped<PipelineOrchestrator>();
         services.AddSingleton<WeeklyPipelineService>();
+
+        configureServices?.Invoke(services);
 
         return services.BuildServiceProvider();
     }

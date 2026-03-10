@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -27,6 +28,7 @@ public class PipelineOrchestratorTests : IDisposable
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
+            .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
             .Options;
 
         _db = new AppDbContext(options);
@@ -93,11 +95,9 @@ public class PipelineOrchestratorTests : IDisposable
     [Fact]
     public async Task RunAsync_ProcessMessageThrows_ContinuesProcessingRemainingMessages()
     {
-        var messages = new List<Message>
-        {
-            new() { Id = 1, ParentId = _testParent.Id, ExternalMessageId = "msg-fail", FromName = "Teacher A", MessageText = "Fail", SentAt = DateTime.UtcNow },
-            new() { Id = 2, ParentId = _testParent.Id, ExternalMessageId = "msg-ok", FromName = "Teacher B", MessageText = "OK", StudentName = "Clara", SentAt = DateTime.UtcNow }
-        };
+        var messages = await SeedUnprocessedMessagesAsync(
+            new Message { ExternalMessageId = "msg-fail", FromName = "Teacher A", MessageText = "Fail", SentAt = DateTime.UtcNow },
+            new Message { ExternalMessageId = "msg-ok", FromName = "Teacher B", MessageText = "OK", StudentName = "Clara", SentAt = DateTime.UtcNow });
 
         _mockDeduplicator.Setup(x => x.GetUnprocessedAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(messages);
@@ -117,21 +117,25 @@ public class PipelineOrchestratorTests : IDisposable
 
         // Second message should still be categorized and processed
         _mockCategorizer.Verify(x => x.CategorizeAsync(It.Is<Message>(m => m.ExternalMessageId == "msg-ok"), It.IsAny<CancellationToken>()), Times.Once);
-        _mockDeduplicator.Verify(x => x.MarkProcessedAsync(It.Is<Message>(m => m.ExternalMessageId == "msg-ok"), It.IsAny<CancellationToken>()), Times.Once);
 
-        // First message should NOT be marked processed (threw during categorization)
-        _mockDeduplicator.Verify(x => x.MarkProcessedAsync(It.Is<Message>(m => m.ExternalMessageId == "msg-fail"), It.IsAny<CancellationToken>()), Times.Never);
+        var processedMessage = await _db.Messages.SingleAsync(m => m.ExternalMessageId == "msg-ok");
+        processedMessage.ProcessedAt.Should().NotBeNull();
+
+        var failedMessage = await _db.Messages.SingleAsync(m => m.ExternalMessageId == "msg-fail");
+        failedMessage.ProcessedAt.Should().BeNull();
     }
 
     [Fact]
     public async Task RunAsync_HasNewsletterUrl_ScraperReturnsText_SavesNewsletterUrlSourceType()
     {
-        var message = new Message
+        var message = await SeedUnprocessedMessageAsync(new Message
         {
-            Id = 1, ParentId = _testParent.Id, ExternalMessageId = "msg-001",
-            FromName = "Teacher", StudentName = "Clara", MessageText = "Check newsletter",
+            ExternalMessageId = "msg-001",
+            FromName = "Teacher",
+            StudentName = "Clara",
+            MessageText = "Check newsletter",
             SentAt = new DateTime(2026, 3, 7, 10, 0, 0, DateTimeKind.Utc)
-        };
+        });
 
         _mockDeduplicator.Setup(x => x.GetUnprocessedAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([message]);
@@ -165,12 +169,14 @@ public class PipelineOrchestratorTests : IDisposable
     [Fact]
     public async Task RunAsync_HasNewsletterUrl_ScraperReturnsNull_FallsBackToMessageText()
     {
-        var message = new Message
+        var message = await SeedUnprocessedMessageAsync(new Message
         {
-            Id = 1, ParentId = _testParent.Id, ExternalMessageId = "msg-001",
-            FromName = "Teacher", StudentName = "Clara", MessageText = "Original message text",
+            ExternalMessageId = "msg-001",
+            FromName = "Teacher",
+            StudentName = "Clara",
+            MessageText = "Original message text",
             SentAt = DateTime.UtcNow
-        };
+        });
 
         _mockDeduplicator.Setup(x => x.GetUnprocessedAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([message]);
@@ -201,12 +207,14 @@ public class PipelineOrchestratorTests : IDisposable
     [Fact]
     public async Task RunAsync_IsNewsItself_SavesMessageTextSourceType()
     {
-        var message = new Message
+        var message = await SeedUnprocessedMessageAsync(new Message
         {
-            Id = 1, ParentId = _testParent.Id, ExternalMessageId = "msg-001",
-            FromName = "Teacher", StudentName = "Clara", MessageText = "Picture day is Friday",
+            ExternalMessageId = "msg-001",
+            FromName = "Teacher",
+            StudentName = "Clara",
+            MessageText = "Picture day is Friday",
             SentAt = DateTime.UtcNow
-        };
+        });
 
         _mockDeduplicator.Setup(x => x.GetUnprocessedAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([message]);
@@ -228,6 +236,51 @@ public class PipelineOrchestratorTests : IDisposable
         var savedItem = await _db.NewsItems.SingleAsync();
         savedItem.SourceType.Should().Be(SourceType.MessageText);
         savedItem.NewsContent.Should().Be("Picture day is Friday");
+    }
+
+    [Fact]
+    public async Task RunAsync_MessageHasNewsAndNewsletterLink_SavesBothSourceTypesOnce()
+    {
+        var message = await SeedUnprocessedMessageAsync(new Message
+        {
+            ExternalMessageId = "msg-both",
+            FromName = "Teacher",
+            StudentName = "Clara",
+            MessageText = "Picture day is Friday. Full details in the newsletter.",
+            SentAt = DateTime.UtcNow
+        });
+
+        _mockDeduplicator.Setup(x => x.GetUnprocessedAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([message]);
+
+        _mockCategorizer.Setup(x => x.CategorizeAsync(It.IsAny<Message>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CategorizationResult
+            {
+                MessageId = "msg-both",
+                HasNewsletterUrl = true,
+                NewsletterUrl = "https://www.smore.com/abc",
+                IsNewsItself = true,
+                Summary = "Picture day and newsletter"
+            });
+
+        _mockScraper.Setup(x => x.ScrapeAsync("https://www.smore.com/abc", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("Newsletter details here");
+
+        _mockSummaryGenerator.Setup(x => x.GenerateAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
+
+        await _orchestrator.RunAsync(_testParent);
+
+        var savedItems = await _db.NewsItems
+            .Where(newsItem => newsItem.SourceMessageId == "msg-both")
+            .OrderBy(newsItem => newsItem.SourceType)
+            .ToListAsync();
+
+        savedItems.Should().HaveCount(2);
+        savedItems.Should().ContainSingle(newsItem => newsItem.SourceType == SourceType.MessageText)
+            .Which.NewsContent.Should().Be("Picture day is Friday. Full details in the newsletter.");
+        savedItems.Should().ContainSingle(newsItem => newsItem.SourceType == SourceType.NewsletterUrl)
+            .Which.NewsContent.Should().Be("Newsletter details here");
     }
 
     [Fact]
@@ -258,5 +311,25 @@ public class PipelineOrchestratorTests : IDisposable
     public void Dispose()
     {
         _db.Dispose();
+    }
+
+    private async Task<Message> SeedUnprocessedMessageAsync(Message message)
+    {
+        message.ParentId = _testParent.Id;
+        _db.Messages.Add(message);
+        await _db.SaveChangesAsync();
+        return message;
+    }
+
+    private async Task<List<Message>> SeedUnprocessedMessagesAsync(params Message[] messages)
+    {
+        foreach (var message in messages)
+        {
+            message.ParentId = _testParent.Id;
+        }
+
+        _db.Messages.AddRange(messages);
+        await _db.SaveChangesAsync();
+        return messages.ToList();
     }
 }

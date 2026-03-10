@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using TalkingPointsSummary.Data;
 using TalkingPointsSummary.Models;
 using TalkingPointsSummary.Pipeline;
@@ -147,6 +148,139 @@ public class PipelineEndToEndTests : IAsyncLifetime
         // Mailpit: both runs send a summary because the second run still sees recent news items.
         var mailCount = await _fixture.GetMailpitMessageCountAsync();
         mailCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task FullPipeline_MessageHasNewsAndNewsletterLink_SavesBothSourceTypes()
+    {
+        var newsletterUrl = $"{_fixture.ContentServerUrl}/both-news.html";
+        _fixture.RegisterContentPage("both-news.html", "<body>Full schedule and logistics</body>");
+
+        _fixture.StubTalkingPointsApi([
+            CreateApiMessage("both-1", "Mrs. Teacher", "Alice", "Picture day is Friday. Full details in the newsletter.")
+        ]);
+
+        _fixture.StubAnthropicCategorizationForMessage("both-1",
+            AnthropicStubResponse.Ok($$"""{"message_id":"both-1","has_newsletter_url":true,"newsletter_url":"{{newsletterUrl}}","is_news_itself":true,"summary":"Picture day and newsletter"}"""));
+        _fixture.StubAnthropicSummary("# Summary\n\nPicture day is Friday.");
+
+        await using var sp = _fixture.CreateServiceProvider();
+        var pipeline = sp.GetRequiredService<WeeklyPipelineService>();
+        var result = await pipeline.TryRunFullPipelineAsync("test", _fixture.SeededParentId, CancellationToken.None);
+
+        result.Should().Be(PipelineRunStatus.Completed);
+
+        await using var scope = sp.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var newsItems = await db.NewsItems
+            .Where(newsItem => newsItem.ParentId == _fixture.SeededParentId && newsItem.SourceMessageId == "both-1")
+            .OrderBy(newsItem => newsItem.SourceType)
+            .ToListAsync();
+
+        newsItems.Should().HaveCount(2);
+        newsItems.Should().ContainSingle(newsItem => newsItem.SourceType == SourceType.MessageText)
+            .Which.NewsContent.Should().Be("Picture day is Friday. Full details in the newsletter.");
+        newsItems.Should().ContainSingle(newsItem => newsItem.SourceType == SourceType.NewsletterUrl)
+            .Which.NewsContent.Should().Be("Full schedule and logistics");
+    }
+
+    [Fact]
+    public async Task FullPipeline_UnprocessedMessageWithExistingNewsletterItem_AddsOnlyMissingSourceType()
+    {
+        var newsletterUrl = $"{_fixture.ContentServerUrl}/retry-news.html";
+        _fixture.RegisterContentPage("retry-news.html", "<body>Newsletter content</body>");
+
+        await using (var seedProvider = _fixture.CreateServiceProvider())
+        await using (var seedScope = seedProvider.CreateAsyncScope())
+        {
+            var seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            seedDb.Messages.Add(new Message
+            {
+                ParentId = _fixture.SeededParentId,
+                ExternalMessageId = "retry-1",
+                FromName = "Mrs. Teacher",
+                StudentName = "Alice",
+                MessageText = "Picture day is Friday. Full details in the newsletter.",
+                SentAt = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                ProcessedAt = null,
+            });
+            seedDb.NewsItems.Add(new NewsItem
+            {
+                ParentId = _fixture.SeededParentId,
+                SourceMessageId = "retry-1",
+                SourceType = SourceType.NewsletterUrl,
+                NewsletterUrl = newsletterUrl,
+                NewsContent = "Newsletter content",
+                AiSummary = "Existing newsletter",
+                FromName = "Mrs. Teacher",
+                StudentName = "Alice",
+                SentAt = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                AnalyzedAt = DateTime.UtcNow,
+            });
+            await seedDb.SaveChangesAsync();
+        }
+
+        _fixture.StubTalkingPointsApi([]);
+        _fixture.StubAnthropicCategorizationForMessage("retry-1",
+            AnthropicStubResponse.Ok($$"""{"message_id":"retry-1","has_newsletter_url":true,"newsletter_url":"{{newsletterUrl}}","is_news_itself":true,"summary":"Picture day and newsletter"}"""));
+        _fixture.StubAnthropicSummary("# Summary\n\nPicture day is Friday.");
+
+        await using var sp = _fixture.CreateServiceProvider();
+        var pipeline = sp.GetRequiredService<WeeklyPipelineService>();
+        var result = await pipeline.TryRunFullPipelineAsync("test", _fixture.SeededParentId, CancellationToken.None);
+
+        result.Should().Be(PipelineRunStatus.Completed);
+
+        await using var scope = sp.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var newsItems = await db.NewsItems
+            .Where(newsItem => newsItem.ParentId == _fixture.SeededParentId && newsItem.SourceMessageId == "retry-1")
+            .ToListAsync();
+
+        newsItems.Should().HaveCount(2);
+        newsItems.Count(newsItem => newsItem.SourceType == SourceType.NewsletterUrl).Should().Be(1);
+        newsItems.Count(newsItem => newsItem.SourceType == SourceType.MessageText).Should().Be(1);
+
+        var message = await db.Messages.SingleAsync(m => m.ParentId == _fixture.SeededParentId && m.ExternalMessageId == "retry-1");
+        message.ProcessedAt.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task FullPipeline_SaveFailure_RollsBackNewsItemsAndProcessedState()
+    {
+        _fixture.StubTalkingPointsApi([
+            CreateApiMessage("rollback-1", "Mrs. Teacher", "Alice", "Picture day is Friday")
+        ]);
+
+        _fixture.StubAnthropicCategorizationForMessage("rollback-1",
+            AnthropicStubResponse.Ok("""{"message_id":"rollback-1","has_newsletter_url":false,"is_news_itself":true,"summary":"Picture day"}"""));
+        _fixture.StubAnthropicSummary("# Summary\n\nPicture day is Friday.");
+
+        await using var sp = _fixture.CreateServiceProvider(services =>
+        {
+            services.AddDbContext<FailingAppDbContext>(options =>
+                options.UseNpgsql(_fixture.PostgresConnectionString,
+                    npgsql => npgsql.MigrationsAssembly("TalkingPointsSummary")));
+            services.AddScoped<AppDbContext>(serviceProvider => serviceProvider.GetRequiredService<FailingAppDbContext>());
+        });
+
+        var pipeline = sp.GetRequiredService<WeeklyPipelineService>();
+        var result = await pipeline.TryRunFullPipelineAsync("test", _fixture.SeededParentId, CancellationToken.None);
+
+        result.Should().Be(PipelineRunStatus.Completed);
+
+        await using var scope = sp.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var newsItems = await db.NewsItems.Where(newsItem => newsItem.SourceMessageId == "rollback-1").ToListAsync();
+        newsItems.Should().BeEmpty();
+
+        var message = await db.Messages.SingleAsync(m => m.ExternalMessageId == "rollback-1" && m.ParentId == _fixture.SeededParentId);
+        message.ProcessedAt.Should().BeNull();
     }
 
     [Fact]
@@ -337,5 +471,28 @@ public class PipelineEndToEndTests : IAsyncLifetime
             CreatedAt = DateTime.UtcNow.AddHours(-1),
             DisplayDate = DateTime.UtcNow.AddHours(-1),
         };
+    }
+
+    private sealed class FailingAppDbContext : AppDbContext
+    {
+        private bool _shouldThrow = true;
+
+        public FailingAppDbContext(DbContextOptions<AppDbContext> options)
+            : base(options)
+        {
+        }
+
+        public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            var result = await base.SaveChangesAsync(cancellationToken);
+
+            if (_shouldThrow && ChangeTracker.Entries<Message>().Any(entry => entry.Entity.ProcessedAt is not null))
+            {
+                _shouldThrow = false;
+                throw new InvalidOperationException("Simulated save failure after flush");
+            }
+
+            return result;
+        }
     }
 }
