@@ -146,22 +146,22 @@ internal sealed class Program
 
         app.MapPost("/debug/pipeline/run-now", async (PipelineRunRequest? request, WeeklyPipelineService pipeline) =>
         {
-            var result = await pipeline.TryRunFullPipelineAsync("admin-debug", request?.ParentId, CancellationToken.None);
+            var result = await pipeline.TryStartPipelineAsync("admin-debug", request?.ParentId, CancellationToken.None);
             return result switch
             {
-                PipelineRunStatus.Completed => Results.Ok(new
+                PipelineStartStatus.Started => Results.Accepted(value: new
                 {
-                    status = "completed",
+                    status = "started",
                     message = request?.ParentId is int parentId
-                        ? $"Pipeline run complete for parent {parentId}."
-                        : "Pipeline run complete for all active parents."
+                        ? $"Pipeline run started for parent {parentId}."
+                        : "Pipeline run started for all active parents."
                 }),
-                PipelineRunStatus.AlreadyRunning => Results.Conflict(new
+                PipelineStartStatus.AlreadyRunning => Results.Conflict(new
                 {
                     status = "already-running",
                     message = "A pipeline run is already in progress."
                 }),
-                PipelineRunStatus.ParentNotFound => Results.NotFound(new
+                PipelineStartStatus.ParentNotFound => Results.NotFound(new
                 {
                     status = "parent-not-found",
                     message = request?.ParentId is int parentId

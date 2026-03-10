@@ -16,6 +16,13 @@ public enum PipelineRunStatus
     ParentNotFound
 }
 
+public enum PipelineStartStatus
+{
+    Started,
+    AlreadyRunning,
+    ParentNotFound
+}
+
 /// <summary>
 /// Background service that runs the weekly pipeline on schedule.
 /// Checks every minute whether it's time to run (default: Monday 8 AM).
@@ -163,6 +170,59 @@ public class WeeklyPipelineService : BackgroundService
             Interlocked.Exchange(ref _isRunInProgress, 0);
             _runLock.Release();
         }
+    }
+
+    public async Task<PipelineStartStatus> TryStartPipelineAsync(string trigger, int? parentId, CancellationToken ct = default)
+    {
+        if (!await _runLock.WaitAsync(TimeSpan.Zero, ct))
+            return PipelineStartStatus.AlreadyRunning;
+
+        if (parentId.HasValue && !await ActiveParentExistsAsync(parentId.Value, ct))
+        {
+            _runLock.Release();
+            return PipelineStartStatus.ParentNotFound;
+        }
+
+        Interlocked.Exchange(ref _isRunInProgress, 1);
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                _logger.LogInformation("Background pipeline run started by {Trigger}{Scope}",
+                    trigger,
+                    parentId.HasValue ? $" for parent {parentId.Value}" : " for all active parents");
+
+                var result = await RunPipelineCoreAsync(parentId, CancellationToken.None);
+
+                if (result == PipelineRunStatus.Completed)
+                {
+                    _logger.LogInformation("Background pipeline run started by {Trigger}{Scope} completed",
+                        trigger,
+                        parentId.HasValue ? $" for parent {parentId.Value}" : " for all active parents");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Background pipeline run started by {Trigger}{Scope} failed",
+                    trigger,
+                    parentId.HasValue ? $" for parent {parentId.Value}" : " for all active parents");
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _isRunInProgress, 0);
+                _runLock.Release();
+            }
+        });
+
+        return PipelineStartStatus.Started;
+    }
+
+    private async Task<bool> ActiveParentExistsAsync(int parentId, CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.Parents.AnyAsync(parent => parent.IsActive && parent.Id == parentId, ct);
     }
 
     private async Task<PipelineRunStatus> RunPipelineCoreAsync(int? parentId, CancellationToken ct)

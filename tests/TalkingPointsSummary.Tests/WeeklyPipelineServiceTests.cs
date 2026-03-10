@@ -152,6 +152,72 @@ public class WeeklyPipelineServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task TryStartPipelineAsync_ParentNotFound_ReturnsParentNotFound()
+    {
+        var service = CreateService(CreateScopeFactory());
+
+        var result = await service.TryStartPipelineAsync("test", parentId: 999, CancellationToken.None);
+
+        result.Should().Be(PipelineStartStatus.ParentNotFound);
+        service.IsRunInProgress.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task TryStartPipelineAsync_AlreadyRunning_ReturnsAlreadyRunning()
+    {
+        var tcs = new TaskCompletionSource();
+        var slowApiClient = new Mock<ITalkingPointsApiClient>();
+        slowApiClient.Setup(x => x.FetchMessagesAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                await tcs.Task;
+                return new List<TalkingPointsMessage>();
+            });
+
+        var scopeFactory = CreateScopeFactory(services =>
+        {
+            services.AddSingleton(slowApiClient.Object);
+        });
+
+        using (var scope = scopeFactory.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Parents.Add(new Parent
+            {
+                Name = "Test", TalkingPointsToken = "t", TalkingPointsContactId = "c",
+                EmailRecipients = "e@e.com", IsActive = true
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = CreateService(scopeFactory);
+        var firstResult = await service.TryStartPipelineAsync("test", CancellationToken.None);
+
+        firstResult.Should().Be(PipelineStartStatus.Started);
+        service.IsRunInProgress.Should().BeTrue();
+
+        var secondResult = await service.TryStartPipelineAsync("test", CancellationToken.None);
+        secondResult.Should().Be(PipelineStartStatus.AlreadyRunning);
+
+        tcs.SetResult();
+
+        await AssertionExtensions.ShouldAsync(async () =>
+        {
+            for (var attempt = 0; attempt < 20; attempt++)
+            {
+                if (!service.IsRunInProgress)
+                {
+                    return;
+                }
+
+                await Task.Delay(50);
+            }
+
+            service.IsRunInProgress.Should().BeFalse();
+        }).NotThrowAsync();
+    }
+
+    [Fact]
     public async Task IsRunInProgress_TrueWhileRunning_FalseAfterComplete()
     {
         var tcs = new TaskCompletionSource();
