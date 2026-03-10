@@ -1,8 +1,8 @@
 services:
   app:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: infra/Dockerfile
     container_name: talking-points-summary
     restart: unless-stopped
     depends_on:
@@ -26,12 +26,12 @@ services:
       - PipelineSchedule__DayOfWeek=1
       - PipelineSchedule__Hour=8
     volumes:
-      - ${TPS_LOGS_PATH:-./docker-data/logs}:/app/logs
+      - ${TPS_LOGS_PATH:-../docker-data/logs}:/app/logs
 
   admin:
     build:
-      context: .
-      dockerfile: Dockerfile.admin
+      context: ..
+      dockerfile: infra/Dockerfile.admin
     container_name: talking-points-admin
     restart: unless-stopped
     depends_on:

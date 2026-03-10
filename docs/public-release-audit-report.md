@@ -80,7 +80,7 @@ This weakens first-run comprehension for outside contributors evaluating the rep
 File references:
 - [README.md](README.md#L3)
 - [README.md](README.md#L85-L149)
-- [docker-compose.yml](docker-compose.yml#L31-L45)
+- [infra/docker-compose.yml](infra/docker-compose.yml#L31-L45)
 - [src/TalkingPointsSummary.AppHost/Program.cs](src/TalkingPointsSummary.AppHost/Program.cs#L10-L84)
 - [src/TalkingPointsSummary.Admin/Program.cs](src/TalkingPointsSummary.Admin/Program.cs#L14-L31)
 
@@ -102,9 +102,9 @@ File references:
 
 ## Docker and Repo Structure Assessment
 
-The Docker and Docker Compose files are in the right place. Keeping [Dockerfile](Dockerfile), [Dockerfile.admin](Dockerfile.admin), and [docker-compose.yml](docker-compose.yml) at the repo root is conventional for a multi-service repository, and the local-development orchestration project living under [src/TalkingPointsSummary.AppHost/Program.cs](src/TalkingPointsSummary.AppHost/Program.cs#L10-L84) also makes sense.
+The Docker and Docker Compose files are grouped under [infra/Dockerfile](infra/Dockerfile), [infra/Dockerfile.admin](infra/Dockerfile.admin), and [infra/docker-compose.yml](infra/docker-compose.yml), while the local-development orchestration project still lives under [src/TalkingPointsSummary.AppHost/Program.cs](src/TalkingPointsSummary.AppHost/Program.cs#L10-L84).
 
-The issue is documentation clarity, not file placement. [docker-compose.yml](docker-compose.yml#L31-L45) defines an admin service and publishes port 5100, while [README.md](README.md#L85-L149) walks through Docker startup and verification without explaining that the admin UI exists, what it is for, or when a contributor should use Docker Compose versus the Aspire AppHost.
+The issue is documentation clarity. [infra/docker-compose.yml](infra/docker-compose.yml#L31-L45) defines an admin service and publishes port 5100, while [README.md](README.md#L85-L149) walks through Docker startup and verification without explaining that the admin UI exists, what it is for, or when a contributor should use Docker Compose versus the Aspire AppHost.
 
 ## Documentation Assessment
 

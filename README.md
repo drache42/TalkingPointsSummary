@@ -64,7 +64,7 @@ Set `Smtp:Username` and `Smtp:Password` only when your SMTP server requires auth
 #### Docker Compose
 
 ```bash
-docker compose up -d --build
+docker compose -f infra/docker-compose.yml --env-file .env up -d --build
 ```
 
 That starts:

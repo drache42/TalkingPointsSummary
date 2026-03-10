@@ -13,18 +13,26 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TalkingPointsSummary.Tests"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{DBB2F6CE-42AA-4444-97A1-A133B87A1E1E}"
 	ProjectSection(SolutionItems) = preProject
+		Directory.Build.props = Directory.Build.props
+		Directory.Build.targets = Directory.Build.targets
 		Directory.Packages.props = Directory.Packages.props
 		.env.example = .env.example
-		docker-compose.yml = docker-compose.yml
-		Dockerfile = Dockerfile
+		.gitignore = .gitignore
 		README.md = README.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "infra", "infra", "{67168290-3E87-4562-A4FA-C4048BBA416A}"
+	ProjectSection(SolutionItems) = preProject
+		infra\docker-compose.yml = infra\docker-compose.yml
+		infra\Dockerfile = infra\Dockerfile
+		infra\Dockerfile.admin = infra\Dockerfile.admin
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{F596720C-1B25-41A4-A234-BB325ECEF00A}"
 	ProjectSection(SolutionItems) = preProject
 		docs\CLI.md = docs\CLI.md
 		docs\F5-DEBUGGING.md = docs\F5-DEBUGGING.md
-		docs\TODO.md = docs\TODO.md
+		docs\images\talkingpoints-devtools-request-headers.png = docs\images\talkingpoints-devtools-request-headers.png
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TalkingPointsSummary.AppHost", "src\TalkingPointsSummary.AppHost\TalkingPointsSummary.AppHost.csproj", "{73C8CA79-E516-49A9-94A7-E56E6C5A7AD3}"
