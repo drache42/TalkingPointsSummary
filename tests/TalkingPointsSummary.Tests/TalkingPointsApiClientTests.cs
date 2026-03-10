@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Moq.Protected;
@@ -23,6 +24,31 @@ public class TalkingPointsApiClientTests
         EmailRecipients = "test@example.com"
     };
 
+    private sealed record LogEntry(LogLevel LogLevel, string Message);
+
+    private sealed class ListLogger<T> : ILogger<T>
+    {
+        public List<LogEntry> Entries { get; } = [];
+
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            Entries.Add(new LogEntry(logLevel, formatter(state, exception)));
+        }
+
+        private sealed class NullScope : IDisposable
+        {
+            public static readonly NullScope Instance = new();
+
+            public void Dispose()
+            {
+            }
+        }
+    }
+
     private static TalkingPointsApiClient CreateClient(HttpMessageHandler handler, TalkingPointsApiOptions? options = null)
     {
         var httpClient = new HttpClient(handler);
@@ -30,6 +56,15 @@ public class TalkingPointsApiClientTests
             httpClient,
             Options.Create(options ?? new TalkingPointsApiOptions()),
             NullLogger<TalkingPointsApiClient>.Instance);
+    }
+
+    private static TalkingPointsApiClient CreateClient(HttpMessageHandler handler, ILogger<TalkingPointsApiClient> logger, TalkingPointsApiOptions? options = null)
+    {
+        var httpClient = new HttpClient(handler);
+        return new TalkingPointsApiClient(
+            httpClient,
+            Options.Create(options ?? new TalkingPointsApiOptions()),
+            logger);
     }
 
     private static Mock<HttpMessageHandler> CreateMockHandler(HttpStatusCode statusCode, object? responseBody = null)
@@ -308,6 +343,35 @@ public class TalkingPointsApiClientTests
 
         requestedPages.Should().Equal(1, 2, 3);
         result.Should().HaveCount(60);
+    }
+
+    [Fact]
+    public async Task FetchMessagesAsync_LogsActualPagesFetched_WhenMaxPagesStopsPagination()
+    {
+        var mockHandler = new Mock<HttpMessageHandler>();
+        mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage request, CancellationToken _) =>
+            {
+                var page = int.Parse(System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query)["page"]!);
+                var body = CreateApiResponse(Enumerable.Range(1, 20).Select(index => CreateApiMessage($"page{page}-{index}")).ToList());
+
+                return new HttpResponseMessage
+                {
+                    StatusCode = HttpStatusCode.OK,
+                    Content = new StringContent(body, Encoding.UTF8, "application/json")
+                };
+            });
+
+        var logger = new ListLogger<TalkingPointsApiClient>();
+        var client = CreateClient(mockHandler.Object, logger, new TalkingPointsApiOptions { MaxPagesPerRun = 3 });
+
+        await client.FetchMessagesAsync(_testParent);
+
+        logger.Entries.Should().Contain(entry =>
+            entry.LogLevel == LogLevel.Information
+            && entry.Message.Contains("across 3 page(s)", StringComparison.Ordinal)
+            && entry.Message.Contains("MaxPagesPerRun=3", StringComparison.Ordinal));
     }
 
     private static string CreateApiResponse(List<TalkingPointsMessage> messages)

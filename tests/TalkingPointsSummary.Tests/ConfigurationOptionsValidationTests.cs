@@ -97,6 +97,7 @@ public class ConfigurationOptionsValidationTests
         var act = () => WorkerConfiguration.EnsureValidatedOptions(provider);
 
         act.Should().NotThrow();
+        provider.GetRequiredService<TimeProvider>().Should().BeSameAs(TimeProvider.System);
     }
 
     [Fact]

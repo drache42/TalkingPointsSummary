@@ -29,8 +29,10 @@ public interface IParentService
     Task<List<Parent>> ListParentsAsync(CancellationToken cancellationToken = default);
 }
 
-public sealed class ParentService(AppDbContext dbContext) : IParentService
+public sealed class ParentService(AppDbContext dbContext, TimeProvider? timeProvider = null) : IParentService
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     public async Task<Parent> CreateParentAsync(CreateParentRequest request, CancellationToken cancellationToken = default)
     {
         var parent = new Parent
@@ -40,7 +42,7 @@ public sealed class ParentService(AppDbContext dbContext) : IParentService
             TalkingPointsContactId = NormalizeRequired(request.TalkingPointsContactId, 100, nameof(request.TalkingPointsContactId)),
             EmailRecipients = NormalizeEmailRecipients(request.EmailRecipients),
             IsActive = request.IsActive,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = _timeProvider.GetUtcDateTime()
         };
 
         dbContext.Parents.Add(parent);

@@ -17,6 +17,7 @@ public class WeeklyPipelineServiceTests : IDisposable
 {
     private readonly string _dbName = Guid.NewGuid().ToString();
     private readonly PipelineScheduleOptions _settings;
+    private readonly FixedTimeProvider _timeProvider = new(new DateTimeOffset(2026, 3, 2, 8, 30, 0, TimeSpan.Zero));
 
     public WeeklyPipelineServiceTests()
     {
@@ -33,7 +34,8 @@ public class WeeklyPipelineServiceTests : IDisposable
         return new WeeklyPipelineService(
             scopeFactory,
             Options.Create(_settings),
-            NullLogger<WeeklyPipelineService>.Instance);
+            NullLogger<WeeklyPipelineService>.Instance,
+            _timeProvider);
     }
 
     private IServiceScopeFactory CreateScopeFactory(Action<IServiceCollection>? configure = null)
@@ -316,8 +318,9 @@ public class WeeklyPipelineServiceTests : IDisposable
         var run = await assertDb.PipelineRuns.SingleAsync();
         run.Trigger.Should().Be("schedule");
         run.ScheduledDate.Should().Be(scheduledAt.Date);
+        run.StartedAt.Should().Be(_timeProvider.GetUtcNow().UtcDateTime);
         run.Status.Should().Be(PipelineRunRecordStatus.Completed);
-        run.CompletedAt.Should().NotBeNull();
+        run.CompletedAt.Should().Be(_timeProvider.GetUtcNow().UtcDateTime);
     }
 
     [Fact]

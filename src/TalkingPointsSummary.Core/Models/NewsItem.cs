@@ -27,8 +27,8 @@ public class NewsItem
     public string FromName { get; set; } = string.Empty;
     public string StudentName { get; set; } = string.Empty;
     public DateTime SentAt { get; set; }
-    public DateTime AnalyzedAt { get; set; } = DateTime.UtcNow;
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime AnalyzedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
 
     // Navigation
     public Parent Parent { get; set; } = null!;

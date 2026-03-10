@@ -12,11 +12,13 @@ public class MessageDeduplicator : IMessageDeduplicator
 {
     private readonly AppDbContext _db;
     private readonly ILogger<MessageDeduplicator> _logger;
+    private readonly TimeProvider _timeProvider;
 
-    public MessageDeduplicator(AppDbContext db, ILogger<MessageDeduplicator> logger)
+    public MessageDeduplicator(AppDbContext db, ILogger<MessageDeduplicator> logger, TimeProvider? timeProvider = null)
     {
         _db = db;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>
@@ -27,6 +29,8 @@ public class MessageDeduplicator : IMessageDeduplicator
         List<TalkingPointsMessage> apiMessages,
         CancellationToken ct = default)
     {
+        var now = _timeProvider.GetUtcDateTime();
+
         var existingIds = (await _db.Messages
             .Where(m => m.ParentId == parent.Id)
             .Select(m => m.ExternalMessageId)
@@ -48,8 +52,8 @@ public class MessageDeduplicator : IMessageDeduplicator
                 StudentName = apiMsg.ContactInfo?.StudentName ?? string.Empty,
                 FromName = apiMsg.From?.User?.Signature ?? apiMsg.FromName ?? string.Empty,
                 MessageText = apiMsg.Text ?? string.Empty,
-                SentAt = apiMsg.DisplayDate ?? apiMsg.CreatedAt ?? DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow
+                SentAt = apiMsg.DisplayDate ?? apiMsg.CreatedAt ?? now,
+                CreatedAt = now
             };
 
             newMessages.Add(message);
@@ -85,7 +89,7 @@ public class MessageDeduplicator : IMessageDeduplicator
     /// </summary>
     public async Task MarkProcessedAsync(Message message, CancellationToken ct = default)
     {
-        message.ProcessedAt = DateTime.UtcNow;
+        message.ProcessedAt = _timeProvider.GetUtcDateTime();
         await _db.SaveChangesAsync(ct);
     }
 }

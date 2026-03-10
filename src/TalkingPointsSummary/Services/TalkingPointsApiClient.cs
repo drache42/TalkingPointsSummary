@@ -40,12 +40,15 @@ public class TalkingPointsApiClient : ITalkingPointsApiClient
 
         var messages = new List<TalkingPointsMessage>();
         var page = 1;
+        var pagesFetched = 0;
         var stopReached = false;
         var maxPages = maxPagesOverride ?? _options.MaxPagesPerRun;
 
         while (!stopReached && page <= maxPages)
         {
             var pageMessages = await FetchPageAsync(parent, page, ct);
+            pagesFetched++;
+
             if (pageMessages.Count == 0)
             {
                 break;
@@ -84,7 +87,7 @@ public class TalkingPointsApiClient : ITalkingPointsApiClient
             "Fetched {Count} new candidate messages for parent {ParentName} across {PageCount} page(s). StopAtReached={StopReached}. MaxPagesPerRun={MaxPagesPerRun}",
             messages.Count,
             parent.Name,
-            page,
+            pagesFetched,
             stopReached,
             maxPages);
 

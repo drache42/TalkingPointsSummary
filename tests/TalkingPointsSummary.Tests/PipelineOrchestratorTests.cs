@@ -13,6 +13,8 @@ namespace TalkingPointsSummary.Tests;
 
 public class PipelineOrchestratorTests : IDisposable
 {
+    private static readonly DateTimeOffset FixedUtcNow = new(2026, 3, 10, 9, 15, 0, TimeSpan.Zero);
+
     private readonly AppDbContext _db;
     private readonly Mock<ITalkingPointsApiClient> _mockApiClient;
     private readonly Mock<IMessageDeduplicator> _mockDeduplicator;
@@ -23,6 +25,7 @@ public class PipelineOrchestratorTests : IDisposable
     private readonly Mock<IEmailSender> _mockEmailSender;
     private readonly PipelineOrchestrator _orchestrator;
     private readonly Parent _testParent;
+    private readonly FixedTimeProvider _timeProvider;
 
     public PipelineOrchestratorTests()
     {
@@ -59,6 +62,7 @@ public class PipelineOrchestratorTests : IDisposable
         _mockSummaryGenerator = new Mock<ISummaryGenerator>();
         _mockMarkdownConverter = new Mock<IMarkdownConverter>();
         _mockEmailSender = new Mock<IEmailSender>();
+        _timeProvider = new FixedTimeProvider(FixedUtcNow);
 
         // Default setup: API returns empty, dedup returns empty
         _mockApiClient.Setup(x => x.FetchMessagesAsync(It.IsAny<Parent>(), It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
@@ -77,7 +81,8 @@ public class PipelineOrchestratorTests : IDisposable
             _mockSummaryGenerator.Object,
             _mockMarkdownConverter.Object,
             _mockEmailSender.Object,
-            NullLogger<PipelineOrchestrator>.Instance);
+            NullLogger<PipelineOrchestrator>.Instance,
+            _timeProvider);
     }
 
     [Fact]
@@ -203,6 +208,8 @@ public class PipelineOrchestratorTests : IDisposable
         savedItem.NewsletterUrl.Should().Be("https://www.smore.com/abc");
         savedItem.StudentName.Should().Be("Clara");
         savedItem.FromName.Should().Be("Teacher");
+        savedItem.AnalyzedAt.Should().Be(FixedUtcNow.UtcDateTime);
+        savedItem.CreatedAt.Should().Be(FixedUtcNow.UtcDateTime);
     }
 
     [Fact]
@@ -346,6 +353,7 @@ public class PipelineOrchestratorTests : IDisposable
         var savedSummary = await _db.Summaries.SingleAsync();
         savedSummary.Content.Should().Be("# Weekly Summary\nContent here");
         savedSummary.ParentId.Should().Be(_testParent.Id);
+        savedSummary.CreatedAt.Should().Be(FixedUtcNow.UtcDateTime);
     }
 
     public void Dispose()

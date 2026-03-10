@@ -7,6 +7,7 @@ using System.Threading;
 using TalkingPointsSummary.Configuration;
 using TalkingPointsSummary.Data;
 using TalkingPointsSummary.Models;
+using TalkingPointsSummary.Services;
 
 namespace TalkingPointsSummary.Pipeline;
 
@@ -34,6 +35,7 @@ public class WeeklyPipelineService : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<WeeklyPipelineService> _logger;
     private readonly PipelineScheduleOptions _schedule;
+    private readonly TimeProvider _timeProvider;
     private readonly SemaphoreSlim _runLock = new(1, 1);
     private int _isRunInProgress;
     private const string ScheduleTrigger = "schedule";
@@ -41,11 +43,13 @@ public class WeeklyPipelineService : BackgroundService
     public WeeklyPipelineService(
         IServiceScopeFactory scopeFactory,
         IOptions<PipelineScheduleOptions> schedule,
-        ILogger<WeeklyPipelineService> logger)
+        ILogger<WeeklyPipelineService> logger,
+        TimeProvider? timeProvider = null)
     {
         _scopeFactory = scopeFactory;
         _schedule = schedule.Value;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -82,7 +86,7 @@ public class WeeklyPipelineService : BackgroundService
         {
             try
             {
-                var now = DateTime.UtcNow;
+                var now = _timeProvider.GetUtcDateTime();
                 if (ShouldRun(now))
                 {
                     _logger.LogInformation("Schedule triggered - evaluating weekly pipeline run");
@@ -274,7 +278,7 @@ public class WeeklyPipelineService : BackgroundService
         {
             Trigger = trigger,
             ScheduledDate = scheduledDate,
-            StartedAt = DateTime.UtcNow,
+            StartedAt = _timeProvider.GetUtcDateTime(),
             Status = PipelineRunRecordStatus.Started
         };
 
@@ -301,7 +305,7 @@ public class WeeklyPipelineService : BackgroundService
             return;
         }
 
-        run.CompletedAt = DateTime.UtcNow;
+        run.CompletedAt = _timeProvider.GetUtcDateTime();
         run.Status = PipelineRunRecordStatus.Completed;
         run.Error = null;
         await db.SaveChangesAsync(ct);
@@ -317,7 +321,7 @@ public class WeeklyPipelineService : BackgroundService
             return;
         }
 
-        run.CompletedAt = DateTime.UtcNow;
+        run.CompletedAt = _timeProvider.GetUtcDateTime();
         run.Status = PipelineRunRecordStatus.Failed;
         run.Error = ex.Message.Length > 1000 ? ex.Message[..1000] : ex.Message;
         await db.SaveChangesAsync(ct);

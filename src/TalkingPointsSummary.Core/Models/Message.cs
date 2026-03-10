@@ -15,7 +15,7 @@ public class Message
     public string FromName { get; set; } = string.Empty;
     public string MessageText { get; set; } = string.Empty;
     public DateTime SentAt { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; }
 
     /// <summary>
     /// Null until the message has been categorized and routed to news/newsletter.

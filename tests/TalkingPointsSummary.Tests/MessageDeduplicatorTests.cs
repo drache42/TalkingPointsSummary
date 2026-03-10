@@ -9,6 +9,8 @@ namespace TalkingPointsSummary.Tests;
 
 public class MessageDeduplicatorTests : IDisposable
 {
+    private static readonly DateTimeOffset FixedUtcNow = new(2026, 3, 10, 14, 30, 0, TimeSpan.Zero);
+
     private readonly AppDbContext _db;
     private readonly MessageDeduplicator _deduplicator;
     private readonly Parent _testParent;
@@ -31,7 +33,7 @@ public class MessageDeduplicatorTests : IDisposable
         _db.Parents.Add(_testParent);
         _db.SaveChanges();
 
-        _deduplicator = new MessageDeduplicator(_db, NullLogger<MessageDeduplicator>.Instance);
+        _deduplicator = new MessageDeduplicator(_db, NullLogger<MessageDeduplicator>.Instance, new FixedTimeProvider(FixedUtcNow));
     }
 
     [Fact]
@@ -54,6 +56,7 @@ public class MessageDeduplicatorTests : IDisposable
         result.Should().HaveCount(1);
         result[0].ExternalMessageId.Should().Be("msg-001");
         result[0].MessageText.Should().Be("Hello parents!");
+        result[0].CreatedAt.Should().Be(FixedUtcNow.UtcDateTime);
 
         _db.Messages.Should().HaveCount(1);
     }
@@ -152,7 +155,7 @@ public class MessageDeduplicatorTests : IDisposable
 
         await _deduplicator.MarkProcessedAsync(message);
 
-        message.ProcessedAt.Should().NotBeNull();
+        message.ProcessedAt.Should().Be(FixedUtcNow.UtcDateTime);
     }
 
     [Fact]

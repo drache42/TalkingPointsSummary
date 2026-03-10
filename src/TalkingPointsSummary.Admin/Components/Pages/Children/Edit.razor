@@ -4,6 +4,7 @@
 @inject IParentService ParentService
 @inject IChildService ChildService
 @inject NavigationManager Nav
+@inject TimeProvider TimeProvider
 
 <PageTitle>@(Id.HasValue ? "Edit Child" : "Add Child") — TalkingPoints Admin</PageTitle>
 
@@ -94,7 +95,7 @@ else
             {
                 Name = child.Name,
                 School = child.School,
-                Grade = GradeCalculator.GetCurrentGrade(child, DateTime.UtcNow),
+                Grade = GradeCalculator.GetCurrentGrade(child, TimeProvider.GetUtcDateTime()),
                 Emoji = child.Emoji,
             };
         }

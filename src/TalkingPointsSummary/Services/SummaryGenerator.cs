@@ -21,17 +21,20 @@ public class SummaryGenerator : ISummaryGenerator
     private readonly AppDbContext _db;
     private readonly AnthropicOptions _anthropic;
     private readonly ILogger<SummaryGenerator> _logger;
+    private readonly TimeProvider _timeProvider;
 
     public SummaryGenerator(
         HttpClient httpClient,
         AppDbContext db,
         IOptions<AnthropicOptions> anthropic,
-        ILogger<SummaryGenerator> logger)
+        ILogger<SummaryGenerator> logger,
+        TimeProvider? timeProvider = null)
     {
         _httpClient = httpClient;
         _db = db;
         _anthropic = anthropic.Value;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>
@@ -39,7 +42,8 @@ public class SummaryGenerator : ISummaryGenerator
     /// </summary>
     public async Task<string?> GenerateAsync(Parent parent, CancellationToken ct = default)
     {
-        var sixWeeksAgo = DateTime.UtcNow.AddDays(-42);
+        var now = _timeProvider.GetUtcDateTime();
+        var sixWeeksAgo = now.AddDays(-42);
 
         var newsItems = await _db.NewsItems
             .Where(n => n.ParentId == parent.Id && n.CreatedAt > sixWeeksAgo)
@@ -61,7 +65,7 @@ public class SummaryGenerator : ISummaryGenerator
             .Where(c => c.ParentId == parent.Id)
             .ToListAsync(ct);
 
-        var prompt = PromptBuilder.Build(DateTime.UtcNow, children, newsItems, previousSummaries);
+        var prompt = PromptBuilder.Build(now, children, newsItems, previousSummaries);
 
         _logger.LogInformation("Generating summary for parent {ParentName} with {NewsCount} news items",
             parent.Name, newsItems.Count);

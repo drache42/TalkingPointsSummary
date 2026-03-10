@@ -46,6 +46,7 @@ internal static class WorkerConfiguration
         AddValidatedOptions(services, configuration);
 
         services.AddLogging(builder => builder.ClearProviders().AddSerilog(Log.Logger));
+        services.AddSingleton(TimeProvider.System);
 
         var connectionString = GetRequiredConnectionString(configuration);
 

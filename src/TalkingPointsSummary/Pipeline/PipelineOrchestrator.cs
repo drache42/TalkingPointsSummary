@@ -22,6 +22,7 @@ public class PipelineOrchestrator
     private readonly IMarkdownConverter _markdownConverter;
     private readonly IEmailSender _emailSender;
     private readonly ILogger<PipelineOrchestrator> _logger;
+    private readonly TimeProvider _timeProvider;
 
     public PipelineOrchestrator(
         AppDbContext db,
@@ -32,7 +33,8 @@ public class PipelineOrchestrator
         ISummaryGenerator summaryGenerator,
         IMarkdownConverter markdownConverter,
         IEmailSender emailSender,
-        ILogger<PipelineOrchestrator> logger)
+        ILogger<PipelineOrchestrator> logger,
+        TimeProvider? timeProvider = null)
     {
         _db = db;
         _apiClient = apiClient;
@@ -43,6 +45,7 @@ public class PipelineOrchestrator
         _markdownConverter = markdownConverter;
         _emailSender = emailSender;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task RunAsync(Parent parent, CancellationToken ct = default)
@@ -108,7 +111,7 @@ public class PipelineOrchestrator
             {
                 ParentId = parent.Id,
                 Content = markdown,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = _timeProvider.GetUtcDateTime()
             };
             _db.Summaries.Add(summary);
             await _db.SaveChangesAsync(ct);
@@ -216,12 +219,12 @@ public class PipelineOrchestrator
             _logger.LogInformation("Saved {SourceType} news item for message {MessageId}", newsItem.SourceType, message.ExternalMessageId);
         }
 
-        message.ProcessedAt = DateTime.UtcNow;
+        message.ProcessedAt = _timeProvider.GetUtcDateTime();
         await _db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
     }
 
-    private static NewsItem CreateNewsItem(
+    private NewsItem CreateNewsItem(
         Parent parent,
         Message message,
         SourceType sourceType,
@@ -229,6 +232,8 @@ public class PipelineOrchestrator
         string aiSummary,
         string? newsletterUrl)
     {
+        var now = _timeProvider.GetUtcDateTime();
+
         return new NewsItem
         {
             ParentId = parent.Id,
@@ -240,8 +245,8 @@ public class PipelineOrchestrator
             FromName = message.FromName,
             StudentName = message.StudentName,
             SentAt = message.SentAt,
-            AnalyzedAt = DateTime.UtcNow,
-            CreatedAt = DateTime.UtcNow
+            AnalyzedAt = now,
+            CreatedAt = now
         };
     }
 }

@@ -40,6 +40,7 @@ public class AdminServiceConfigurationTests
         scopedProvider.GetRequiredService<AppDbContext>().Should().NotBeNull();
         scopedProvider.GetRequiredService<IParentService>().Should().NotBeNull();
         scopedProvider.GetRequiredService<IChildService>().Should().NotBeNull();
+        scopedProvider.GetRequiredService<TimeProvider>().Should().BeSameAs(TimeProvider.System);
         scopedProvider.GetRequiredService<IOptions<DebugFeaturesOptions>>().Value.Enabled.Should().BeFalse();
     }
 

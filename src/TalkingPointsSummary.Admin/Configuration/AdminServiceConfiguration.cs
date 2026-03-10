@@ -15,6 +15,8 @@ public static class AdminServiceConfiguration
 
     public static void ConfigureApplicationServices(IServiceCollection services, IConfiguration configuration)
     {
+        services.AddSingleton(TimeProvider.System);
+
         services.AddOptions<DebugFeaturesOptions>()
             .Bind(configuration.GetSection(DebugFeaturesOptions.SectionName));
 
