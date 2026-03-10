@@ -23,27 +23,27 @@ if (builder.Configuration.GetValue<bool>("ManagePostgres", true))
     worker = builder.AddProject<Projects.TalkingPointsSummary>("worker")
         .WithReference(db)
         .WaitFor(db)
-        .WithEnvironment("CONNECTION_STRING", db)
+        .WithEnvironment("ConnectionStrings__TalkingPoints", db)
         .WithEnvironment("ASPNETCORE_URLS", "http://127.0.0.1:5101");
 
     admin = builder.AddProject<Projects.TalkingPointsSummary_Admin>("admin")
         .WithReference(db)
         .WaitFor(db)
-        .WithEnvironment("CONNECTION_STRING", db)
+        .WithEnvironment("ConnectionStrings__TalkingPoints", db)
         .WithEnvironment("WorkerDebugBaseUrl", "http://127.0.0.1:5101/");
 }
 else
 {
     // External PostgreSQL — supply connection string via appsettings.json or user secrets:
-    //   "ConnectionStrings": { "postgres": "Host=...;Database=...;Username=...;Password=..." }
-    var postgres = builder.AddConnectionString("postgres");
+    //   "ConnectionStrings": { "TalkingPoints": "Host=...;Database=...;Username=...;Password=..." }
+    var postgres = builder.AddConnectionString("TalkingPoints");
 
     worker = builder.AddProject<Projects.TalkingPointsSummary>("worker")
-        .WithEnvironment("CONNECTION_STRING", postgres)
+        .WithEnvironment("ConnectionStrings__TalkingPoints", postgres)
         .WithEnvironment("ASPNETCORE_URLS", "http://127.0.0.1:5101");
 
     admin = builder.AddProject<Projects.TalkingPointsSummary_Admin>("admin")
-        .WithEnvironment("CONNECTION_STRING", postgres)
+        .WithEnvironment("ConnectionStrings__TalkingPoints", postgres)
         .WithEnvironment("WorkerDebugBaseUrl", "http://127.0.0.1:5101/");
 }
 
@@ -59,19 +59,18 @@ if (builder.Configuration.GetValue<bool>("ManageBrowserless", true))
 
     worker
         .WaitFor(browserless)
-        .WithEnvironment("BROWSERLESS_HOST", browserlessEndpoint.Property(EndpointProperty.Host))
-        .WithEnvironment("BROWSERLESS_PORT", browserlessEndpoint.Property(EndpointProperty.Port));
+        .WithEnvironment("Browserless__BaseUrl", browserlessEndpoint.Property(EndpointProperty.Url));
 }
 else
 {
-    var browserlessUrl = builder.Configuration["BrowserlessUrl"];
+    var browserlessUrl = builder.Configuration["Browserless:BaseUrl"];
     if (string.IsNullOrWhiteSpace(browserlessUrl))
     {
         throw new InvalidOperationException(
-            "ManageBrowserless is false, but BrowserlessUrl is not configured. Set BrowserlessUrl in AppHost configuration or user secrets.");
+            "ManageBrowserless is false, but Browserless:BaseUrl is not configured. Set Browserless:BaseUrl in AppHost configuration or user secrets.");
     }
 
-    worker.WithEnvironment("BROWSERLESS_URL", browserlessUrl);
+    worker.WithEnvironment("Browserless__BaseUrl", browserlessUrl);
 }
 
 if (builder.Configuration.GetValue<bool>("ManageMailpit", true))
@@ -86,8 +85,8 @@ if (builder.Configuration.GetValue<bool>("ManageMailpit", true))
 
     worker
         .WaitFor(mailpit)
-        .WithEnvironment("SMTP_HOST", smtpEndpoint.Property(EndpointProperty.Host))
-        .WithEnvironment("SMTP_PORT", smtpEndpoint.Property(EndpointProperty.Port));
+        .WithEnvironment("Smtp__Host", smtpEndpoint.Property(EndpointProperty.Host))
+        .WithEnvironment("Smtp__Port", smtpEndpoint.Property(EndpointProperty.Port));
 }
 
 // Pass optional CLI args to the worker (e.g. "run" or "check-config" set via AppHost launch profile)

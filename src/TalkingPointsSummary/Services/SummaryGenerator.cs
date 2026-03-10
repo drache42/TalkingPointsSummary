@@ -19,18 +19,18 @@ public class SummaryGenerator : ISummaryGenerator
 
     private readonly HttpClient _httpClient;
     private readonly AppDbContext _db;
-    private readonly AppSettings _settings;
+    private readonly AnthropicOptions _anthropic;
     private readonly ILogger<SummaryGenerator> _logger;
 
     public SummaryGenerator(
         HttpClient httpClient,
         AppDbContext db,
-        IOptions<AppSettings> settings,
+        IOptions<AnthropicOptions> anthropic,
         ILogger<SummaryGenerator> logger)
     {
         _httpClient = httpClient;
         _db = db;
-        _settings = settings.Value;
+        _anthropic = anthropic.Value;
         _logger = logger;
     }
 
@@ -77,7 +77,7 @@ public class SummaryGenerator : ISummaryGenerator
         };
 
         var request = new HttpRequestMessage(HttpMethod.Post, "https://api.anthropic.com/v1/messages");
-        request.Headers.Add("x-api-key", _settings.AnthropicApiKey);
+    request.Headers.Add("x-api-key", _anthropic.ApiKey);
         request.Headers.Add("anthropic-version", "2023-06-01");
         request.Content = JsonContent.Create(requestBody);
 

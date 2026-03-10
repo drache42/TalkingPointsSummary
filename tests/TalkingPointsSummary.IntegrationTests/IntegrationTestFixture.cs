@@ -171,30 +171,33 @@ public class IntegrationTestFixture : IAsyncLifetime
     /// </summary>
     public ServiceProvider CreateServiceProvider()
     {
-        var appSettings = new AppSettings
-        {
-            ConnectionString = PostgresConnectionString,
-            AnthropicApiKey = "test-anthropic-key",
-            BrowserlessUrl = BrowserlessUrl,
-            Smtp = new SmtpSettings
-            {
-                Host = MailpitSmtpHost,
-                Port = MailpitSmtpPort,
-                Username = string.Empty,
-                Password = string.Empty,
-                FromEmail = "test-sender@example.com",
-            },
-            ScheduleDayOfWeek = 1,
-            ScheduleHour = 8,
-        };
-
         var services = new ServiceCollection();
 
-        services.AddSingleton(Options.Create(appSettings));
+        services.AddSingleton(Options.Create(new AnthropicOptions
+        {
+            ApiKey = "test-anthropic-key",
+        }));
+        services.AddSingleton(Options.Create(new BrowserlessOptions
+        {
+            BaseUrl = BrowserlessUrl,
+        }));
+        services.AddSingleton(Options.Create(new SmtpOptions
+        {
+            Host = MailpitSmtpHost,
+            Port = MailpitSmtpPort,
+            Username = string.Empty,
+            Password = string.Empty,
+            FromEmail = "test-sender@example.com",
+        }));
+        services.AddSingleton(Options.Create(new PipelineScheduleOptions
+        {
+            DayOfWeek = 1,
+            Hour = 8,
+        }));
         services.AddLogging(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Debug));
 
         services.AddDbContext<AppDbContext>(options =>
-            options.UseNpgsql(appSettings.ConnectionString,
+            options.UseNpgsql(PostgresConnectionString,
                 npgsql => npgsql.MigrationsAssembly("TalkingPointsSummary")));
 
         // DelegatingHandler that rewrites absolute external URLs to point at WireMock

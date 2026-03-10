@@ -13,17 +13,16 @@ services:
       mailpit:
         condition: service_healthy
     environment:
-      - CONNECTION_STRING=Host=postgres;Database=talkingpoints;Username=postgres;Password=postgres
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - BROWSERLESS_URL=http://browserless:3000
-      - SMTP_HOST=${SMTP_HOST:-mailpit}
-      - SMTP_PORT=${SMTP_PORT:-1025}
-      - SMTP_USERNAME=${SMTP_USERNAME:-}
-      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
-      - SMTP_FROM=${SMTP_FROM}
-      # Schedule: Monday (1) at 8 AM UTC
-      - SCHEDULE_DAY=1
-      - SCHEDULE_HOUR=8
+      - ConnectionStrings__TalkingPoints=Host=postgres;Database=talkingpoints;Username=postgres;Password=postgres
+      - Anthropic__ApiKey=${ANTHROPIC_API_KEY}
+      - Browserless__BaseUrl=http://browserless:3000
+      - Smtp__Host=${SMTP_HOST:-mailpit}
+      - Smtp__Port=${SMTP_PORT:-1025}
+      - Smtp__Username=${SMTP_USERNAME:-}
+      - Smtp__Password=${SMTP_PASSWORD:-}
+      - Smtp__FromEmail=${SMTP_FROM}
+      - PipelineSchedule__DayOfWeek=1
+      - PipelineSchedule__Hour=8
     volumes:
       - ${TPS_LOGS_PATH:-./docker-data/logs}:/app/logs
 
@@ -37,7 +36,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      - CONNECTION_STRING=Host=postgres;Database=talkingpoints;Username=postgres;Password=postgres
+      - ConnectionStrings__TalkingPoints=Host=postgres;Database=talkingpoints;Username=postgres;Password=postgres
     ports:
       - "5100:8080"
 

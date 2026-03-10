@@ -5,8 +5,9 @@ using TalkingPointsSummary.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var connectionString = builder.Configuration["CONNECTION_STRING"]
-    ?? "Host=localhost;Database=talkingpoints;Username=postgres;Password=postgres";
+var connectionString = builder.Configuration.GetConnectionString("TalkingPoints")
+    ?? throw new InvalidOperationException(
+        "Missing required connection string 'TalkingPoints'. Configure ConnectionStrings:TalkingPoints via appsettings, user secrets, or environment variables.");
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();

@@ -29,16 +29,16 @@ public partial class MessageCategorizer : IMessageCategorizer
     private static readonly MessageCategorizationPromptBuilder PromptBuilder = new();
 
     private readonly HttpClient _httpClient;
-    private readonly AppSettings _settings;
+    private readonly AnthropicOptions _anthropic;
     private readonly ILogger<MessageCategorizer> _logger;
 
     public MessageCategorizer(
         HttpClient httpClient,
-        IOptions<AppSettings> settings,
+        IOptions<AnthropicOptions> anthropic,
         ILogger<MessageCategorizer> logger)
     {
         _httpClient = httpClient;
-        _settings = settings.Value;
+        _anthropic = anthropic.Value;
         _logger = logger;
     }
 
@@ -60,7 +60,7 @@ public partial class MessageCategorizer : IMessageCategorizer
         };
 
         var request = new HttpRequestMessage(HttpMethod.Post, "https://api.anthropic.com/v1/messages");
-        request.Headers.Add("x-api-key", _settings.AnthropicApiKey);
+    request.Headers.Add("x-api-key", _anthropic.ApiKey);
         request.Headers.Add("anthropic-version", "2023-06-01");
         request.Content = JsonContent.Create(requestBody);
 

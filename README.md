@@ -31,20 +31,24 @@ A .NET 10 Worker Service that automatically fetches school messages
 - **Gmail SMTP credentials** (or other SMTP provider)
 - **TalkingPoints account** (parent credentials)
 
-## Environment Variables
+## Application Configuration
 
-| Variable | Description | Default |
+The worker uses standard hierarchical .NET configuration sections.
+
+| Setting | Environment Variable Equivalent | Description |
 |---|---|---|
-| `CONNECTION_STRING` | PostgreSQL connection string | `Host=localhost;Database=talkingpoints;...` |
-| `ANTHROPIC_API_KEY` | Anthropic API key for Claude | *(required)* |
-| `BROWSERLESS_URL` | Browserless service URL | `http://browserless:3000` |
-| `SMTP_HOST` | SMTP server hostname | `smtp.gmail.com` |
-| `SMTP_PORT` | SMTP server port | `587` |
-| `SMTP_USERNAME` | SMTP login username | *(required)* |
-| `SMTP_PASSWORD` | SMTP login password (app password) | *(required)* |
-| `SMTP_FROM` | Sender email address | *(required)* |
-| `SCHEDULE_DAY` | Day of week to run (0=Sun, 1=Mon, ...) | `1` (Monday) |
-| `SCHEDULE_HOUR` | Hour to run (UTC, 24h) | `8` |
+| `ConnectionStrings:TalkingPoints` | `ConnectionStrings__TalkingPoints` | PostgreSQL connection string |
+| `Anthropic:ApiKey` | `Anthropic__ApiKey` | Anthropic API key for Claude |
+| `Browserless:BaseUrl` | `Browserless__BaseUrl` | Browserless base URL |
+| `Smtp:Host` | `Smtp__Host` | SMTP server hostname |
+| `Smtp:Port` | `Smtp__Port` | SMTP server port |
+| `Smtp:Username` | `Smtp__Username` | SMTP login username |
+| `Smtp:Password` | `Smtp__Password` | SMTP login password |
+| `Smtp:FromEmail` | `Smtp__FromEmail` | Sender email address |
+| `PipelineSchedule:DayOfWeek` | `PipelineSchedule__DayOfWeek` | Day of week to run (0=Sun, 1=Mon, ...) |
+| `PipelineSchedule:Hour` | `PipelineSchedule__Hour` | Hour to run (UTC, 24h) |
+
+`appsettings.Local.json` is still loaded if present and should use the same nested JSON structure as `appsettings.json`. For local development, user secrets are the preferred place for secrets.
 
 ## Quick Start
 
@@ -53,9 +57,18 @@ A .NET 10 Worker Service that automatically fetches school messages
 ```bash
 git clone <repo-url>
 cd TalkingPointsSummary
-cp .env.example .env
-# Edit .env with your actual credentials
 ```
+
+For local development, configure the worker with user secrets:
+
+```bash
+cd src/TalkingPointsSummary
+dotnet user-secrets set "ConnectionStrings:TalkingPoints" "Host=localhost;Database=talkingpoints;Username=postgres;Password=postgres"
+dotnet user-secrets set "Anthropic:ApiKey" "your-anthropic-key"
+dotnet user-secrets set "Smtp:FromEmail" "you@example.com"
+```
+
+Set `Smtp:Username` and `Smtp:Password` only if your SMTP server requires authentication. `appsettings.Development.json` already defaults to `localhost:1025` for Mailpit-style local SMTP.
 
 ### 2. Build and run with Docker
 
@@ -136,11 +149,11 @@ The solution uses [.NET Aspire](https://learn.microsoft.com/en-us/dotnet/aspire/
 - Aspire dashboard opens showing logs and resource health
 - Stopping the debugger shuts the container down
 
-**On a machine with external PostgreSQL:** Set `ManagePostgres: false` and supply a connection string in the AppHost via user secrets — no code changes needed. See [docs/F5-DEBUGGING.md](docs/F5-DEBUGGING.md).
+**On a machine with external PostgreSQL:** Set `ManagePostgres: false` and supply `ConnectionStrings:TalkingPoints` in the AppHost via user secrets — no code changes needed. See [docs/F5-DEBUGGING.md](docs/F5-DEBUGGING.md).
 
-**With an external Browserless service:** Set `ManageBrowserless: false` and configure `BrowserlessUrl` in the AppHost. The worker will use that external endpoint instead of the Aspire-managed container.
+**With an external Browserless service:** Set `ManageBrowserless: false` and configure `Browserless:BaseUrl` in the AppHost. The worker will use that external endpoint instead of the Aspire-managed container.
 
-**On a machine with external Browserless:** Set `ManageBrowserless: false` and supply `BrowserlessUrl` in the AppHost via user secrets or `appsettings.Development.json`. See [docs/F5-DEBUGGING.md](docs/F5-DEBUGGING.md).
+**On a machine with external Browserless:** Set `ManageBrowserless: false` and supply `Browserless:BaseUrl` in the AppHost via user secrets or `appsettings.Development.json`. See [docs/F5-DEBUGGING.md](docs/F5-DEBUGGING.md).
 
 **Prerequisite:** Docker Desktop running with `postgres:15-alpine` pulled.
 
@@ -161,13 +174,15 @@ dotnet ef migrations add InitialCreate --project src/TalkingPointsSummary
 # Run tests
 dotnet test
 
-# Run locally (requires Postgres + env vars)
+# Run locally (requires Postgres + configured secrets)
 cd src/TalkingPointsSummary
 dotnet run
 
 # Stop PostgreSQL
 docker-compose down
 ```
+
+For direct local runs, configure the worker through user secrets or environment variables using the section-based names shown above.
 
 ## Database Schema
 

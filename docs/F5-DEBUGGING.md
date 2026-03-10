@@ -23,7 +23,7 @@ If you have your own PostgreSQL instance (local install, remote server, cloud), 
 {
   "ManagePostgres": false,
   "ConnectionStrings": {
-    "postgres": "Host=myserver;Database=talkingpoints;Username=postgres;Password=secret"
+    "TalkingPoints": "Host=myserver;Database=talkingpoints;Username=postgres;Password=secret"
   }
 }
 ```
@@ -32,7 +32,7 @@ To use user secrets:
 ```bash
 cd src/TalkingPointsSummary.AppHost
 dotnet user-secrets set ManagePostgres false
-dotnet user-secrets set ConnectionStrings:postgres "Host=...;Database=talkingpoints;..."
+dotnet user-secrets set ConnectionStrings:TalkingPoints "Host=...;Database=talkingpoints;..."
 ```
 
 The Worker Service code is unaffected in either case.
@@ -44,7 +44,9 @@ If Browserless is running outside Aspire, disable the managed container and prov
 ```json
 {
   "ManageBrowserless": false,
-  "BrowserlessUrl": "http://127.0.0.1:50660"
+  "Browserless": {
+    "BaseUrl": "http://127.0.0.1:50660"
+  }
 }
 ```
 
@@ -53,29 +55,25 @@ To use user secrets:
 ```bash
 cd src/TalkingPointsSummary.AppHost
 dotnet user-secrets set ManageBrowserless false
-dotnet user-secrets set BrowserlessUrl "http://127.0.0.1:50660"
+dotnet user-secrets set Browserless:BaseUrl "http://127.0.0.1:50660"
 ```
 
-When `ManageBrowserless` is `false`, the AppHost now requires `BrowserlessUrl` to be set and injects it into the worker as `BROWSERLESS_URL`.
+When `ManageBrowserless` is `false`, the AppHost now requires `Browserless:BaseUrl` to be set and injects it into the worker as `Browserless__BaseUrl`.
 
 ## Running the Worker Directly (Without Aspire)
 
-If you want to run or debug the `TalkingPointsSummary` worker project directly — without starting the AppHost — the connection string is read from `CONNECTION_STRING` in `src/TalkingPointsSummary/Properties/launchSettings.json`:
-
-```json
-"CONNECTION_STRING": "Host=localhost;Database=talkingpoints;Username=postgres;Password=postgres"
-```
-
-Update that value to match your local PostgreSQL instance. This file is committed with the default localhost credentials, so adjust it for your machine without committing the change if your credentials differ.
-
-Alternatively, use `dotnet user-secrets` on the worker project so no file change is needed:
+If you want to run or debug the `TalkingPointsSummary` worker project directly — without starting the AppHost — configure the worker project with user secrets:
 
 ```bash
 cd src/TalkingPointsSummary
-dotnet user-secrets set CONNECTION_STRING "Host=myserver;Database=talkingpoints;Username=postgres;Password=secret"
+dotnet user-secrets set ConnectionStrings:TalkingPoints "Host=myserver;Database=talkingpoints;Username=postgres;Password=secret"
+dotnet user-secrets set Anthropic:ApiKey "your-anthropic-key"
+dotnet user-secrets set Smtp:FromEmail "you@example.com"
 ```
 
-> **Note:** User secrets take precedence over `launchSettings.json` environment variables when running via `dotnet run` or Visual Studio.
+For Mailpit-style local SMTP, `src/TalkingPointsSummary/appsettings.Development.json` already defaults to `Smtp:Host = localhost` and `Smtp:Port = 1025`.
+
+> **Note:** User secrets take precedence over appsettings when running via `dotnet run` or Visual Studio.
 
 ## First-Time Setup: Generating Migrations
 

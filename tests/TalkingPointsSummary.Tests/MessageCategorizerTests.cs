@@ -27,8 +27,8 @@ public class MessageCategorizerTests
     private static MessageCategorizer CreateCategorizer(HttpMessageHandler handler)
     {
         var httpClient = new HttpClient(handler);
-        var settings = Options.Create(new AppSettings { AnthropicApiKey = "test-key" });
-        return new MessageCategorizer(httpClient, settings, NullLogger<MessageCategorizer>.Instance);
+        var options = Options.Create(new AnthropicOptions { ApiKey = "test-key" });
+        return new MessageCategorizer(httpClient, options, NullLogger<MessageCategorizer>.Instance);
     }
 
     private static Mock<HttpMessageHandler> CreateMockHandler(string responseJson)

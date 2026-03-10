@@ -12,16 +12,16 @@ namespace TalkingPointsSummary.Services;
 public class NewsletterScraper : INewsletterScraper
 {
     private readonly HttpClient _httpClient;
-    private readonly AppSettings _settings;
+    private readonly BrowserlessOptions _browserless;
     private readonly ILogger<NewsletterScraper> _logger;
 
     public NewsletterScraper(
         HttpClient httpClient,
-        IOptions<AppSettings> settings,
+        IOptions<BrowserlessOptions> browserless,
         ILogger<NewsletterScraper> logger)
     {
         _httpClient = httpClient;
-        _settings = settings.Value;
+        _browserless = browserless.Value;
         _logger = logger;
     }
 
@@ -32,7 +32,7 @@ public class NewsletterScraper : INewsletterScraper
     {
         _logger.LogInformation("Scraping newsletter URL: {Url}", url);
 
-        var scrapeUrl = $"{_settings.BrowserlessUrl.TrimEnd('/')}/scrape";
+        var scrapeUrl = $"{_browserless.BaseUrl.TrimEnd('/')}/scrape";
 
         var requestBody = new
         {

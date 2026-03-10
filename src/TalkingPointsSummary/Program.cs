@@ -7,7 +7,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Serilog;
 using Serilog.Events;
 using TalkingPointsSummary.Commands;
@@ -51,19 +50,17 @@ internal sealed class Program
 
         try
         {
-            var appSettings = BuildAppSettings(configuration);
-
             if (args.Length > 0)
             {
-                await RunCliAsync(args, appSettings);
+                await RunCliAsync(args, configuration);
             }
             else if (string.Equals(environmentName, Environments.Development, StringComparison.OrdinalIgnoreCase))
             {
-                await RunDevelopmentWorkerAsync(args, environmentName, configuration, appSettings);
+                await RunDevelopmentWorkerAsync(args, environmentName, configuration);
             }
             else
             {
-                await RunWorkerAsync(configuration, appSettings);
+                await RunWorkerAsync(configuration);
             }
         }
         catch (Exception ex)
@@ -78,15 +75,7 @@ internal sealed class Program
     }
 
     private static IConfiguration BuildConfiguration(string environmentName)
-    {
-        return new ConfigurationBuilder()
-            .SetBasePath(Directory.GetCurrentDirectory())
-            .AddJsonFile("appsettings.json", optional: false)
-            .AddJsonFile($"appsettings.{environmentName}.json", optional: true)
-            .AddJsonFile("appsettings.Local.json", optional: true)
-            .AddEnvironmentVariables()
-            .Build();
-    }
+        => WorkerConfiguration.BuildConfiguration(Directory.GetCurrentDirectory(), environmentName);
 
     private static bool IsNoisyEfCommandLog(Serilog.Events.LogEvent logEvent)
     {
@@ -103,84 +92,28 @@ internal sealed class Program
         return string.Equals(sourceContext.ToString().Trim('"'), EfCommandSourceContext, StringComparison.Ordinal);
     }
 
-    private static AppSettings BuildAppSettings(IConfiguration configuration)
-    {
-        var browserlessUrl = configuration["BROWSERLESS_URL"];
-        if (string.IsNullOrWhiteSpace(browserlessUrl))
-        {
-            var browserlessHost = configuration["BROWSERLESS_HOST"];
-            var browserlessPort = configuration["BROWSERLESS_PORT"];
-
-            if (!string.IsNullOrWhiteSpace(browserlessHost) && !string.IsNullOrWhiteSpace(browserlessPort))
-            {
-                browserlessUrl = $"http://{browserlessHost}:{browserlessPort}";
-            }
-        }
-
-        return new AppSettings
-        {
-            ConnectionString = configuration["CONNECTION_STRING"]
-                ?? "Host=localhost;Database=talkingpoints;Username=postgres;Password=postgres",
-            AnthropicApiKey = configuration["ANTHROPIC_API_KEY"] ?? string.Empty,
-            BrowserlessUrl = browserlessUrl ?? "http://browserless:3000",
-            Smtp = new SmtpSettings
-            {
-                Host = configuration["SMTP_HOST"] ?? "smtp.gmail.com",
-                Port = int.TryParse(configuration["SMTP_PORT"], out var port) ? port : 587,
-                Username = configuration["SMTP_USERNAME"] ?? string.Empty,
-                Password = configuration["SMTP_PASSWORD"] ?? string.Empty,
-                FromEmail = configuration["SMTP_FROM"] ?? string.Empty,
-            },
-            ScheduleDayOfWeek = int.TryParse(configuration["SCHEDULE_DAY"], out var day) ? day : 1,
-            ScheduleHour = int.TryParse(configuration["SCHEDULE_HOUR"], out var hour) ? hour : 8,
-        };
-    }
-
-    private static void ConfigureServices(IServiceCollection services, AppSettings appSettings)
-    {
-        services.AddSingleton(Options.Create(appSettings));
-        services.AddLogging(builder => builder.ClearProviders().AddSerilog(Log.Logger));
-
-        services.AddDbContext<AppDbContext>(options =>
-            options.UseNpgsql(appSettings.ConnectionString,
-                npgsql => npgsql.MigrationsAssembly(typeof(Program).Assembly.GetName().Name ?? "TalkingPointsSummary")));
-
-        services.AddHttpClient<ITalkingPointsApiClient, TalkingPointsApiClient>();
-        services.AddHttpClient<IMessageCategorizer, MessageCategorizer>();
-        services.AddHttpClient<INewsletterScraper, NewsletterScraper>(client =>
-        {
-            client.Timeout = TimeSpan.FromSeconds(90);
-        });
-        services.AddHttpClient<ISummaryGenerator, SummaryGenerator>();
-
-        services.AddScoped<IMessageDeduplicator, MessageDeduplicator>();
-        services.AddSingleton<IMarkdownConverter, MarkdownConverter>();
-        services.AddScoped<IEmailSender, EmailSender>();
-        services.AddScoped<PipelineOrchestrator>();
-        services.AddSingleton<WeeklyPipelineService>();
-        services.AddScoped<StartupValidator>();
-    }
-
-    private static async Task RunCliAsync(string[] args, AppSettings appSettings)
+    private static async Task RunCliAsync(string[] args, IConfiguration configuration)
     {
         var services = new ServiceCollection();
-        ConfigureServices(services, appSettings);
+        WorkerConfiguration.ConfigureServices(services, configuration);
 
         using var serviceProvider = services.BuildServiceProvider();
+        WorkerConfiguration.EnsureValidatedOptions(serviceProvider);
         await InitializeApplicationAsync(serviceProvider);
 
         var rootCommand = CommandHandler.BuildRootCommand(serviceProvider);
         await rootCommand.Parse(args).InvokeAsync();
     }
 
-    private static async Task RunWorkerAsync(IConfiguration configuration, AppSettings appSettings)
+    private static async Task RunWorkerAsync(IConfiguration configuration)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Configuration.AddConfiguration(configuration);
-        ConfigureServices(builder.Services, appSettings);
+        WorkerConfiguration.ConfigureServices(builder.Services, builder.Configuration);
         builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<WeeklyPipelineService>());
 
         using var host = builder.Build();
+        WorkerConfiguration.EnsureValidatedOptions(host.Services);
         await InitializeApplicationAsync(host.Services);
         await host.RunAsync();
     }
@@ -188,8 +121,7 @@ internal sealed class Program
     private static async Task RunDevelopmentWorkerAsync(
         string[] args,
         string environmentName,
-        IConfiguration configuration,
-        AppSettings appSettings)
+        IConfiguration configuration)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -205,10 +137,11 @@ internal sealed class Program
             builder.WebHost.UseUrls("http://127.0.0.1:5101");
         }
 
-        ConfigureServices(builder.Services, appSettings);
+        WorkerConfiguration.ConfigureServices(builder.Services, builder.Configuration);
         builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<WeeklyPipelineService>());
 
         var app = builder.Build();
+        WorkerConfiguration.EnsureValidatedOptions(app.Services);
         await InitializeApplicationAsync(app.Services);
 
         app.MapPost("/debug/pipeline/run-now", async (PipelineRunRequest? request, WeeklyPipelineService pipeline) =>

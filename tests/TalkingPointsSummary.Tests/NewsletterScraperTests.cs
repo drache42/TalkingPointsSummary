@@ -15,8 +15,8 @@ public class NewsletterScraperTests
     private static NewsletterScraper CreateScraper(HttpMessageHandler handler)
     {
         var httpClient = new HttpClient(handler);
-        var settings = Options.Create(new AppSettings { BrowserlessUrl = "http://localhost:3000" });
-        return new NewsletterScraper(httpClient, settings, NullLogger<NewsletterScraper>.Instance);
+        var options = Options.Create(new BrowserlessOptions { BaseUrl = "http://localhost:3000" });
+        return new NewsletterScraper(httpClient, options, NullLogger<NewsletterScraper>.Instance);
     }
 
     private static Mock<HttpMessageHandler> CreateMockHandler(HttpStatusCode statusCode, string responseBody)

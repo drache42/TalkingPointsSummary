@@ -16,14 +16,14 @@ namespace TalkingPointsSummary.Tests;
 public class WeeklyPipelineServiceTests : IDisposable
 {
     private readonly string _dbName = Guid.NewGuid().ToString();
-    private readonly AppSettings _settings;
+    private readonly PipelineScheduleOptions _settings;
 
     public WeeklyPipelineServiceTests()
     {
-        _settings = new AppSettings
+        _settings = new PipelineScheduleOptions
         {
-            ScheduleDayOfWeek = 1, // Monday
-            ScheduleHour = 8
+            DayOfWeek = 1, // Monday
+            Hour = 8
         };
     }
 
@@ -43,7 +43,11 @@ public class WeeklyPipelineServiceTests : IDisposable
             options.UseInMemoryDatabase(_dbName));
 
         // Register mock service dependencies for PipelineOrchestrator
-        services.AddSingleton(Options.Create(_settings));
+        services.AddSingleton(Options.Create(new PipelineScheduleOptions
+        {
+            DayOfWeek = _settings.DayOfWeek,
+            Hour = _settings.Hour,
+        }));
         var mockApiClient = new Mock<ITalkingPointsApiClient>();
         mockApiClient.Setup(x => x.FetchMessagesAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
@@ -71,8 +75,8 @@ public class WeeklyPipelineServiceTests : IDisposable
     [InlineData(DayOfWeek.Monday, 8, 1, 9, false)]    // Monday 8 AM, schedule Monday 9 = wrong hour
     public void ShouldRun_RespectsSchedule(DayOfWeek dayOfWeek, int hour, int scheduledDay, int scheduledHour, bool expected)
     {
-        _settings.ScheduleDayOfWeek = scheduledDay;
-        _settings.ScheduleHour = scheduledHour;
+        _settings.DayOfWeek = scheduledDay;
+        _settings.Hour = scheduledHour;
         var service = CreateService();
 
         // Find a date that falls on the specified day of week

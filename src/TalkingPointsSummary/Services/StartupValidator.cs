@@ -19,20 +19,26 @@ public record ValidationCheckResult(string Name, CheckStatus Status, string Deta
 /// </summary>
 public class StartupValidator
 {
-    private readonly AppSettings _settings;
+    private readonly AnthropicOptions _anthropic;
+    private readonly BrowserlessOptions _browserless;
+    private readonly SmtpOptions _smtp;
     private readonly AppDbContext _db;
     private readonly ITalkingPointsApiClient _talkingPointsClient;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<StartupValidator> _logger;
 
     public StartupValidator(
-        IOptions<AppSettings> settings,
+        IOptions<AnthropicOptions> anthropic,
+        IOptions<BrowserlessOptions> browserless,
+        IOptions<SmtpOptions> smtp,
         AppDbContext db,
         ITalkingPointsApiClient talkingPointsClient,
         IHttpClientFactory httpClientFactory,
         ILogger<StartupValidator> logger)
     {
-        _settings = settings.Value;
+        _anthropic = anthropic.Value;
+        _browserless = browserless.Value;
+        _smtp = smtp.Value;
         _db = db;
         _talkingPointsClient = talkingPointsClient;
         _httpClientFactory = httpClientFactory;
@@ -59,16 +65,12 @@ public class StartupValidator
     {
         var missing = new List<string>();
 
-        if (string.IsNullOrWhiteSpace(_settings.AnthropicApiKey))
-            missing.Add("ANTHROPIC_API_KEY");
-        if (string.IsNullOrWhiteSpace(_settings.Smtp.Host))
-            missing.Add("SMTP_HOST");
-        if (string.IsNullOrWhiteSpace(_settings.Smtp.Username))
-            missing.Add("SMTP_USERNAME");
-        if (string.IsNullOrWhiteSpace(_settings.Smtp.Password))
-            missing.Add("SMTP_PASSWORD");
-        if (string.IsNullOrWhiteSpace(_settings.Smtp.FromEmail))
-            missing.Add("SMTP_FROM");
+        if (string.IsNullOrWhiteSpace(_anthropic.ApiKey))
+            missing.Add("Anthropic:ApiKey");
+        if (string.IsNullOrWhiteSpace(_smtp.Host))
+            missing.Add("Smtp:Host");
+        if (string.IsNullOrWhiteSpace(_smtp.FromEmail))
+            missing.Add("Smtp:FromEmail");
 
         return missing.Count == 0
             ? new ValidationCheckResult("Config presence", CheckStatus.Pass, "All required environment variables are set")
@@ -104,14 +106,14 @@ public class StartupValidator
 
     private async Task<ValidationCheckResult> CheckAnthropicApiKeyAsync(CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(_settings.AnthropicApiKey))
-            return new ValidationCheckResult("Anthropic API key", CheckStatus.Fail, "ANTHROPIC_API_KEY is not set");
+        if (string.IsNullOrWhiteSpace(_anthropic.ApiKey))
+            return new ValidationCheckResult("Anthropic API key", CheckStatus.Fail, "Anthropic:ApiKey is not set");
 
         try
         {
             var client = _httpClientFactory.CreateClient();
             var request = new HttpRequestMessage(HttpMethod.Post, "https://api.anthropic.com/v1/messages");
-            request.Headers.Add("x-api-key", _settings.AnthropicApiKey);
+            request.Headers.Add("x-api-key", _anthropic.ApiKey);
             request.Headers.Add("anthropic-version", "2023-06-01");
             // Minimal body — we only care whether auth succeeds, not whether the request is valid
             request.Content = JsonContent.Create(new
@@ -146,7 +148,7 @@ public class StartupValidator
         {
             var client = _httpClientFactory.CreateClient();
             client.Timeout = TimeSpan.FromSeconds(10);
-            var scrapeUrl = _settings.BrowserlessUrl.TrimEnd('/') + "/scrape";
+            var scrapeUrl = _browserless.BaseUrl.TrimEnd('/') + "/scrape";
             using var request = new HttpRequestMessage(HttpMethod.Post, scrapeUrl)
             {
                 Content = JsonContent.Create(new
@@ -175,39 +177,39 @@ public class StartupValidator
         catch (Exception ex)
         {
             return new ValidationCheckResult("Browserless reachability", CheckStatus.Fail,
-                $"Cannot reach {_settings.BrowserlessUrl}: {ex.Message}");
+                $"Cannot reach {_browserless.BaseUrl}: {ex.Message}");
         }
     }
 
     private async Task<ValidationCheckResult> CheckSmtpAsync(CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(_settings.Smtp.Host))
-            return new ValidationCheckResult("SMTP connectivity", CheckStatus.Fail, "SMTP_HOST is not set");
+        if (string.IsNullOrWhiteSpace(_smtp.Host))
+            return new ValidationCheckResult("SMTP connectivity", CheckStatus.Fail, "Smtp:Host is not set");
 
         try
         {
             using var client = new SmtpClient();
-            await client.ConnectAsync(_settings.Smtp.Host, _settings.Smtp.Port, SecureSocketOptions.Auto, ct);
+            await client.ConnectAsync(_smtp.Host, _smtp.Port, SecureSocketOptions.Auto, ct);
 
             if (!client.Capabilities.HasFlag(SmtpCapabilities.Authentication))
             {
                 await client.DisconnectAsync(true, ct);
                 return new ValidationCheckResult("SMTP connectivity", CheckStatus.Warn,
-                    $"Connected to {_settings.Smtp.Host}:{_settings.Smtp.Port} — server does not require authentication (e.g. Mailpit)");
+                    $"Connected to {_smtp.Host}:{_smtp.Port} — server does not require authentication (e.g. Mailpit)");
             }
 
-            if (string.IsNullOrWhiteSpace(_settings.Smtp.Username) || string.IsNullOrWhiteSpace(_settings.Smtp.Password))
+            if (string.IsNullOrWhiteSpace(_smtp.Username) || string.IsNullOrWhiteSpace(_smtp.Password))
             {
                 await client.DisconnectAsync(true, ct);
                 return new ValidationCheckResult("SMTP connectivity", CheckStatus.Warn,
-                    $"Connected to {_settings.Smtp.Host}:{_settings.Smtp.Port} but credentials are not set — authentication skipped");
+                    $"Connected to {_smtp.Host}:{_smtp.Port} but credentials are not set — authentication skipped");
             }
 
-            await client.AuthenticateAsync(_settings.Smtp.Username, _settings.Smtp.Password, ct);
+            await client.AuthenticateAsync(_smtp.Username, _smtp.Password, ct);
             await client.DisconnectAsync(true, ct);
 
             return new ValidationCheckResult("SMTP connectivity", CheckStatus.Pass,
-                $"Connected and authenticated to {_settings.Smtp.Host}:{_settings.Smtp.Port}");
+                $"Connected and authenticated to {_smtp.Host}:{_smtp.Port}");
         }
         catch (AuthenticationException ex)
         {

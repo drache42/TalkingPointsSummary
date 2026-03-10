@@ -12,12 +12,12 @@ namespace TalkingPointsSummary.Services;
 /// </summary>
 public class EmailSender : IEmailSender
 {
-    private readonly AppSettings _settings;
+    private readonly SmtpOptions _smtp;
     private readonly ILogger<EmailSender> _logger;
 
-    public EmailSender(IOptions<AppSettings> settings, ILogger<EmailSender> logger)
+    public EmailSender(IOptions<SmtpOptions> smtp, ILogger<EmailSender> logger)
     {
-        _settings = settings.Value;
+        _smtp = smtp.Value;
         _logger = logger;
     }
 
@@ -30,7 +30,7 @@ public class EmailSender : IEmailSender
     public async Task SendAsync(string recipients, string subject, string htmlBody, CancellationToken ct = default)
     {
         var message = new MimeMessage();
-        message.From.Add(MailboxAddress.Parse(_settings.Smtp.FromEmail));
+        message.From.Add(MailboxAddress.Parse(_smtp.FromEmail));
 
         foreach (var email in recipients.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
@@ -45,12 +45,12 @@ public class EmailSender : IEmailSender
         _logger.LogInformation("Sending email to {Recipients} with subject '{Subject}'", recipients, subject);
 
         using var client = new SmtpClient();
-        await client.ConnectAsync(_settings.Smtp.Host, _settings.Smtp.Port, SecureSocketOptions.Auto, ct);
+        await client.ConnectAsync(_smtp.Host, _smtp.Port, SecureSocketOptions.Auto, ct);
 
         if (client.Capabilities.HasFlag(SmtpCapabilities.Authentication)
-            && !string.IsNullOrWhiteSpace(_settings.Smtp.Username))
+            && !string.IsNullOrWhiteSpace(_smtp.Username))
         {
-            await client.AuthenticateAsync(_settings.Smtp.Username, _settings.Smtp.Password, ct);
+            await client.AuthenticateAsync(_smtp.Username, _smtp.Password, ct);
         }
 
         await client.SendAsync(message, ct);

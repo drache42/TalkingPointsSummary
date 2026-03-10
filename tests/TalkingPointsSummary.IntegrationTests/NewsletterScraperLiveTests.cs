@@ -52,7 +52,7 @@ public class NewsletterScraperLiveTests : IAsyncLifetime
         using var loggerFactory = LoggerFactory.Create(builder => { });
         var scraper = new NewsletterScraper(
             httpClient,
-            Options.Create(new AppSettings { BrowserlessUrl = "http://browserless.test" }),
+            Options.Create(new BrowserlessOptions { BaseUrl = "http://browserless.test" }),
             loggerFactory.CreateLogger<NewsletterScraper>());
 
         // Act

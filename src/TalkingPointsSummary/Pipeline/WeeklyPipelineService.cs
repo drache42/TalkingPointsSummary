@@ -24,18 +24,18 @@ public class WeeklyPipelineService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<WeeklyPipelineService> _logger;
-    private readonly AppSettings _settings;
+    private readonly PipelineScheduleOptions _schedule;
     private readonly SemaphoreSlim _runLock = new(1, 1);
     private DateTime? _lastRunDate;
     private int _isRunInProgress;
 
     public WeeklyPipelineService(
         IServiceScopeFactory scopeFactory,
-        IOptions<AppSettings> settings,
+        IOptions<PipelineScheduleOptions> schedule,
         ILogger<WeeklyPipelineService> logger)
     {
         _scopeFactory = scopeFactory;
-        _settings = settings.Value;
+        _schedule = schedule.Value;
         _logger = logger;
     }
 
@@ -43,8 +43,8 @@ public class WeeklyPipelineService : BackgroundService
     {
         _logger.LogInformation(
             "Weekly pipeline service started. Schedule: {Day} at {Hour}:00",
-            (DayOfWeek)_settings.ScheduleDayOfWeek,
-            _settings.ScheduleHour);
+            (DayOfWeek)_schedule.DayOfWeek,
+            _schedule.Hour);
 
         // Gate: do not start the scheduler until migrations are fully applied.
         // This makes the service self-resilient if somehow ExecuteAsync starts before
@@ -104,10 +104,10 @@ public class WeeklyPipelineService : BackgroundService
     internal bool ShouldRun(DateTime now)
     {
         // Check day of week and hour
-        if ((int)now.DayOfWeek != _settings.ScheduleDayOfWeek)
+        if ((int)now.DayOfWeek != _schedule.DayOfWeek)
             return false;
 
-        if (now.Hour != _settings.ScheduleHour)
+        if (now.Hour != _schedule.Hour)
             return false;
 
         // Don't run more than once per day
