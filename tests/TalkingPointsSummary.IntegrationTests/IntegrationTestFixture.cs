@@ -151,6 +151,7 @@ public class IntegrationTestFixture : IAsyncLifetime
         await using var serviceProvider = CreateServiceProvider();
         await using var scope = serviceProvider.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await db.Database.ExecuteSqlRawAsync("TRUNCATE TABLE \"PipelineRuns\" CASCADE");
         await db.Database.ExecuteSqlRawAsync("TRUNCATE TABLE \"Summaries\" CASCADE");
         await db.Database.ExecuteSqlRawAsync("TRUNCATE TABLE \"NewsItems\" CASCADE");
         await db.Database.ExecuteSqlRawAsync("TRUNCATE TABLE \"Messages\" CASCADE");

@@ -1,6 +1,8 @@
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using System.Diagnostics;
+using TalkingPointsSummary.Data;
 using TalkingPointsSummary.Pipeline;
 using TalkingPointsSummary.Services;
 
@@ -113,6 +115,49 @@ public class WeeklyPipelineServiceIntegrationTests : IAsyncLifetime
         await runTask;
         await WaitForConditionAsync(() => !pipeline.IsRunInProgress, TimeSpan.FromSeconds(5));
         pipeline.IsRunInProgress.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task TryRunScheduledPipeline_AfterServiceRestart_SkipsSecondRunForSameDate()
+    {
+        const string summaryMarkdown = "# Summary\n\nTest";
+        var scheduledAt = new DateTime(2026, 3, 2, 8, 30, 0, DateTimeKind.Utc);
+
+        _fixture.StubTalkingPointsApi(new List<TalkingPointsMessage>
+        {
+            new()
+            {
+                Id = "scheduled-1",
+                Text = "Scheduled test",
+                FromName = "Teacher",
+                From = new TalkingPointsFrom { User = new TalkingPointsUser { Signature = "Teacher" } },
+                ContactInfo = new TalkingPointsContactInfo { StudentName = "Alice" },
+                CreatedAt = DateTime.UtcNow,
+                DisplayDate = DateTime.UtcNow,
+            }
+        });
+        _fixture.StubAnthropicCategorization(
+            """{"message_id":"scheduled-1","has_newsletter_url":false,"is_news_itself":true,"summary":"Scheduled"}""");
+        _fixture.StubAnthropicSummary(summaryMarkdown);
+
+        await using var sp1 = _fixture.CreateServiceProvider();
+        var firstService = sp1.GetRequiredService<WeeklyPipelineService>();
+
+        var firstResult = await firstService.TryRunScheduledPipelineAsync(scheduledAt, CancellationToken.None);
+
+        firstResult.Should().Be(PipelineRunStatus.Completed);
+
+        await using var sp2 = _fixture.CreateServiceProvider();
+        var secondService = sp2.GetRequiredService<WeeklyPipelineService>();
+
+        var secondResult = await secondService.TryRunScheduledPipelineAsync(scheduledAt, CancellationToken.None);
+
+        secondResult.Should().Be(PipelineRunStatus.AlreadyScheduled);
+
+        await using var assertionProvider = _fixture.CreateServiceProvider();
+        var db = assertionProvider.GetRequiredService<AppDbContext>();
+        (await db.PipelineRuns.Where(run => run.Trigger == "schedule").ToListAsync()).Should().ContainSingle();
+        (await db.Summaries.Where(summary => summary.ParentId == _fixture.SeededParentId).ToListAsync()).Should().ContainSingle();
     }
 
     private static async Task WaitForConditionAsync(Func<bool> predicate, TimeSpan timeout)

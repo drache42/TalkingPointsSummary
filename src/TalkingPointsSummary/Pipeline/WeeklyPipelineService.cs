@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using System.Threading;
 using TalkingPointsSummary.Configuration;
 using TalkingPointsSummary.Data;
+using TalkingPointsSummary.Models;
 
 namespace TalkingPointsSummary.Pipeline;
 
@@ -13,6 +14,7 @@ public enum PipelineRunStatus
 {
     Completed,
     AlreadyRunning,
+    AlreadyScheduled,
     ParentNotFound
 }
 
@@ -33,8 +35,8 @@ public class WeeklyPipelineService : BackgroundService
     private readonly ILogger<WeeklyPipelineService> _logger;
     private readonly PipelineScheduleOptions _schedule;
     private readonly SemaphoreSlim _runLock = new(1, 1);
-    private DateTime? _lastRunDate;
     private int _isRunInProgress;
+    private const string ScheduleTrigger = "schedule";
 
     public WeeklyPipelineService(
         IServiceScopeFactory scopeFactory,
@@ -84,10 +86,15 @@ public class WeeklyPipelineService : BackgroundService
                 if (ShouldRun(now))
                 {
                     _logger.LogInformation("Schedule triggered - evaluating weekly pipeline run");
-                    var result = await TryRunFullPipelineAsync("schedule", stoppingToken);
+                    var result = await TryRunScheduledPipelineAsync(now, stoppingToken);
                     if (result == PipelineRunStatus.Completed)
                     {
-                        _lastRunDate = now.Date;
+                        continue;
+                    }
+
+                    if (result == PipelineRunStatus.AlreadyScheduled)
+                    {
+                        _logger.LogInformation("Scheduled pipeline run skipped because a run was already recorded for {Date}", now.Date);
                     }
                     else
                     {
@@ -117,12 +124,11 @@ public class WeeklyPipelineService : BackgroundService
         if (now.Hour != _schedule.Hour)
             return false;
 
-        // Don't run more than once per day
-        if (_lastRunDate.HasValue && _lastRunDate.Value == now.Date)
-            return false;
-
         return true;
     }
+
+    internal Task<PipelineRunStatus> TryRunScheduledPipelineAsync(DateTime now, CancellationToken ct = default)
+        => TryRunPipelineAsync(ScheduleTrigger, parentId: null, scheduledDate: now.Date, ct);
 
     /// <summary>
     /// Runs the full pipeline for all active parents. Can be called manually via CLI.
@@ -139,22 +145,40 @@ public class WeeklyPipelineService : BackgroundService
     public bool IsRunInProgress => Volatile.Read(ref _isRunInProgress) == 1;
 
     public async Task<PipelineRunStatus> TryRunFullPipelineAsync(string trigger, CancellationToken ct = default)
-        => await TryRunFullPipelineAsync(trigger, parentId: null, ct);
+        => await TryRunPipelineAsync(trigger, parentId: null, scheduledDate: null, ct);
 
     public async Task<PipelineRunStatus> TryRunFullPipelineAsync(string trigger, int? parentId, CancellationToken ct = default)
+        => await TryRunPipelineAsync(trigger, parentId, scheduledDate: null, ct);
+
+    private async Task<PipelineRunStatus> TryRunPipelineAsync(string trigger, int? parentId, DateTime? scheduledDate, CancellationToken ct)
     {
         if (!await _runLock.WaitAsync(TimeSpan.Zero, ct))
             return PipelineRunStatus.AlreadyRunning;
 
         Interlocked.Exchange(ref _isRunInProgress, 1);
+        int? pipelineRunId = null;
 
         try
         {
+            if (scheduledDate.HasValue)
+            {
+                pipelineRunId = await TryCreateScheduledRunRecordAsync(trigger, scheduledDate.Value, ct);
+                if (!pipelineRunId.HasValue)
+                {
+                    return PipelineRunStatus.AlreadyScheduled;
+                }
+            }
+
             _logger.LogInformation("Pipeline run started by {Trigger}{Scope}",
                 trigger,
                 parentId.HasValue ? $" for parent {parentId.Value}" : " for all active parents");
 
             var result = await RunPipelineCoreAsync(parentId, ct);
+
+            if (pipelineRunId.HasValue)
+            {
+                await MarkPipelineRunCompletedAsync(pipelineRunId.Value, ct);
+            }
 
             if (result == PipelineRunStatus.Completed)
             {
@@ -164,6 +188,15 @@ public class WeeklyPipelineService : BackgroundService
             }
 
             return result;
+        }
+        catch (Exception ex)
+        {
+            if (pipelineRunId.HasValue)
+            {
+                await MarkPipelineRunFailedAsync(pipelineRunId.Value, ex, CancellationToken.None);
+            }
+
+            throw;
         }
         finally
         {
@@ -223,6 +256,71 @@ public class WeeklyPipelineService : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         return await db.Parents.AnyAsync(parent => parent.IsActive && parent.Id == parentId, ct);
+    }
+
+    private async Task<int?> TryCreateScheduledRunRecordAsync(string trigger, DateTime scheduledDate, CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var existingRun = await db.PipelineRuns
+            .AnyAsync(run => run.Trigger == trigger && run.ScheduledDate == scheduledDate, ct);
+        if (existingRun)
+        {
+            return null;
+        }
+
+        var run = new PipelineRun
+        {
+            Trigger = trigger,
+            ScheduledDate = scheduledDate,
+            StartedAt = DateTime.UtcNow,
+            Status = PipelineRunRecordStatus.Started
+        };
+
+        db.PipelineRuns.Add(run);
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return run.Id;
+        }
+        catch (DbUpdateException)
+        {
+            return null;
+        }
+    }
+
+    private async Task MarkPipelineRunCompletedAsync(int pipelineRunId, CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var run = await db.PipelineRuns.FindAsync([pipelineRunId], ct);
+        if (run is null)
+        {
+            return;
+        }
+
+        run.CompletedAt = DateTime.UtcNow;
+        run.Status = PipelineRunRecordStatus.Completed;
+        run.Error = null;
+        await db.SaveChangesAsync(ct);
+    }
+
+    private async Task MarkPipelineRunFailedAsync(int pipelineRunId, Exception ex, CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var run = await db.PipelineRuns.FindAsync([pipelineRunId], ct);
+        if (run is null)
+        {
+            return;
+        }
+
+        run.CompletedAt = DateTime.UtcNow;
+        run.Status = PipelineRunRecordStatus.Failed;
+        run.Error = ex.Message.Length > 1000 ? ex.Message[..1000] : ex.Message;
+        await db.SaveChangesAsync(ct);
     }
 
     private async Task<PipelineRunStatus> RunPipelineCoreAsync(int? parentId, CancellationToken ct)

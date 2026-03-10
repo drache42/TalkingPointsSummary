@@ -258,6 +258,101 @@ public class WeeklyPipelineServiceTests : IDisposable
         service.IsRunInProgress.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task TryRunScheduledPipelineAsync_WhenRunAlreadyRecorded_ReturnsAlreadyScheduled()
+    {
+        var scopeFactory = CreateScopeFactory();
+        var scheduledAt = new DateTime(2026, 3, 2, 8, 30, 0, DateTimeKind.Utc);
+
+        using (var scope = scopeFactory.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.PipelineRuns.Add(new PipelineRun
+            {
+                Trigger = "schedule",
+                ScheduledDate = scheduledAt.Date,
+                StartedAt = scheduledAt,
+                CompletedAt = scheduledAt.AddMinutes(1),
+                Status = PipelineRunRecordStatus.Completed
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = CreateService(scopeFactory);
+
+        var result = await service.TryRunScheduledPipelineAsync(scheduledAt, CancellationToken.None);
+
+        result.Should().Be(PipelineRunStatus.AlreadyScheduled);
+    }
+
+    [Fact]
+    public async Task TryRunScheduledPipelineAsync_PersistsRunRecordEvenWhenNoSummaryProduced()
+    {
+        var scopeFactory = CreateScopeFactory();
+        var scheduledAt = new DateTime(2026, 3, 2, 8, 30, 0, DateTimeKind.Utc);
+
+        using (var scope = scopeFactory.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Parents.Add(new Parent
+            {
+                Name = "Test",
+                TalkingPointsToken = "t",
+                TalkingPointsContactId = "c",
+                EmailRecipients = "e@e.com",
+                IsActive = true
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = CreateService(scopeFactory);
+
+        var result = await service.TryRunScheduledPipelineAsync(scheduledAt, CancellationToken.None);
+
+        result.Should().Be(PipelineRunStatus.Completed);
+
+        using var assertScope = scopeFactory.CreateScope();
+        var assertDb = assertScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var run = await assertDb.PipelineRuns.SingleAsync();
+        run.Trigger.Should().Be("schedule");
+        run.ScheduledDate.Should().Be(scheduledAt.Date);
+        run.Status.Should().Be(PipelineRunRecordStatus.Completed);
+        run.CompletedAt.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task TryRunScheduledPipelineAsync_AfterManualRun_StillRunsSchedule()
+    {
+        var scopeFactory = CreateScopeFactory();
+        var scheduledAt = new DateTime(2026, 3, 2, 8, 30, 0, DateTimeKind.Utc);
+
+        using (var scope = scopeFactory.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Parents.Add(new Parent
+            {
+                Name = "Test",
+                TalkingPointsToken = "t",
+                TalkingPointsContactId = "c",
+                EmailRecipients = "e@e.com",
+                IsActive = true
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = CreateService(scopeFactory);
+
+        var manualResult = await service.TryRunFullPipelineAsync("manual", CancellationToken.None);
+        var scheduledResult = await service.TryRunScheduledPipelineAsync(scheduledAt, CancellationToken.None);
+
+        manualResult.Should().Be(PipelineRunStatus.Completed);
+        scheduledResult.Should().Be(PipelineRunStatus.Completed);
+
+        using var assertScope = scopeFactory.CreateScope();
+        var assertDb = assertScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        assertDb.PipelineRuns.Should().ContainSingle(run => run.Trigger == "schedule");
+    }
+
     public void Dispose()
     {
         // InMemory databases are cleaned up when the last connection closes

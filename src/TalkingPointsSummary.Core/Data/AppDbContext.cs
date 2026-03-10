@@ -12,6 +12,7 @@ public class AppDbContext : DbContext
     public DbSet<Message> Messages => Set<Message>();
     public DbSet<NewsItem> NewsItems => Set<NewsItem>();
     public DbSet<Summary> Summaries => Set<Summary>();
+    public DbSet<PipelineRun> PipelineRuns => Set<PipelineRun>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -29,6 +30,7 @@ public class AppDbContext : DbContext
             entity.HasMany(e => e.Messages).WithOne(m => m.Parent).HasForeignKey(m => m.ParentId).OnDelete(DeleteBehavior.Cascade);
             entity.HasMany(e => e.NewsItems).WithOne(n => n.Parent).HasForeignKey(n => n.ParentId).OnDelete(DeleteBehavior.Cascade);
             entity.HasMany(e => e.Summaries).WithOne(s => s.Parent).HasForeignKey(s => s.ParentId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany<PipelineRun>().WithOne(run => run.Parent).HasForeignKey(run => run.ParentId).OnDelete(DeleteBehavior.SetNull);
         });
 
         // Child
@@ -70,6 +72,19 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => new { e.ParentId, e.CreatedAt });
+        });
+
+        // PipelineRun
+        modelBuilder.Entity<PipelineRun>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Trigger).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Status).IsRequired().HasConversion<string>().HasMaxLength(50);
+            entity.Property(e => e.Error).HasMaxLength(1000);
+            entity.HasIndex(e => e.StartedAt);
+            entity.HasIndex(e => new { e.Trigger, e.ScheduledDate })
+                .IsUnique()
+                .HasFilter("\"Trigger\" = 'schedule' AND \"ScheduledDate\" IS NOT NULL");
         });
     }
 }
