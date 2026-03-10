@@ -13,7 +13,7 @@ namespace TalkingPointsSummary.Services;
 /// <summary>
 /// Uses Claude Sonnet to generate a weekly parent briefing summary.
 /// </summary>
-public class SummaryGenerator
+public class SummaryGenerator : ISummaryGenerator
 {
     private static readonly SummaryPromptBuilder PromptBuilder = new();
 

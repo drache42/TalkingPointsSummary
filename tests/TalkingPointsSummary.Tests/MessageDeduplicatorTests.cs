@@ -155,6 +155,78 @@ public class MessageDeduplicatorTests : IDisposable
         message.ProcessedAt.Should().NotBeNull();
     }
 
+    [Fact]
+    public async Task GetUnprocessedAsync_CrossParentIsolation_DoesNotReturnOtherParentsMessages()
+    {
+        var otherParent = new Parent
+        {
+            Name = "Other Parent",
+            TalkingPointsToken = "other-token",
+            TalkingPointsContactId = "other-contact",
+            EmailRecipients = "other@example.com"
+        };
+        _db.Parents.Add(otherParent);
+        await _db.SaveChangesAsync();
+
+        _db.Messages.AddRange(
+            new Message { ParentId = _testParent.Id, ExternalMessageId = "msg-mine", MessageText = "Mine", SentAt = DateTime.UtcNow },
+            new Message { ParentId = otherParent.Id, ExternalMessageId = "msg-other", MessageText = "Other", SentAt = DateTime.UtcNow }
+        );
+        await _db.SaveChangesAsync();
+
+        var result = await _deduplicator.GetUnprocessedAsync(_testParent);
+
+        result.Should().HaveCount(1);
+        result[0].ExternalMessageId.Should().Be("msg-mine");
+    }
+
+    [Fact]
+    public async Task GetUnprocessedAsync_OrdersBySentAt()
+    {
+        _db.Messages.AddRange(
+            new Message { ParentId = _testParent.Id, ExternalMessageId = "msg-later", MessageText = "Later", SentAt = new DateTime(2026, 3, 9, 12, 0, 0, DateTimeKind.Utc) },
+            new Message { ParentId = _testParent.Id, ExternalMessageId = "msg-earlier", MessageText = "Earlier", SentAt = new DateTime(2026, 3, 7, 8, 0, 0, DateTimeKind.Utc) },
+            new Message { ParentId = _testParent.Id, ExternalMessageId = "msg-middle", MessageText = "Middle", SentAt = new DateTime(2026, 3, 8, 10, 0, 0, DateTimeKind.Utc) }
+        );
+        await _db.SaveChangesAsync();
+
+        var result = await _deduplicator.GetUnprocessedAsync(_testParent);
+
+        result.Should().HaveCount(3);
+        result[0].ExternalMessageId.Should().Be("msg-earlier");
+        result[1].ExternalMessageId.Should().Be("msg-middle");
+        result[2].ExternalMessageId.Should().Be("msg-later");
+    }
+
+    [Fact]
+    public async Task DeduplicateAndSaveAsync_MapsFieldsCorrectly()
+    {
+        var apiMessages = new List<TalkingPointsMessage>
+        {
+            new()
+            {
+                Id = "msg-fields",
+                Text = "Hello parents!",
+                FromName = "Direct FromName",
+                From = new TalkingPointsFrom { User = new TalkingPointsUser { Signature = "Ms. Jane Smith" } },
+                ContactInfo = new TalkingPointsContactInfo { StudentName = "Clara" },
+                ContactMessageId = "contact-123",
+                DisplayDate = new DateTime(2026, 3, 7, 10, 0, 0, DateTimeKind.Utc)
+            }
+        };
+
+        var result = await _deduplicator.DeduplicateAndSaveAsync(_testParent, apiMessages);
+
+        result.Should().HaveCount(1);
+        var saved = result[0];
+        saved.StudentName.Should().Be("Clara");
+        saved.FromName.Should().Be("Ms. Jane Smith"); // Signature takes precedence over FromName
+        saved.MessageText.Should().Be("Hello parents!");
+        saved.ExternalMessageId.Should().Be("msg-fields");
+        saved.ContactMessageId.Should().Be("contact-123");
+        saved.SentAt.Should().Be(new DateTime(2026, 3, 7, 10, 0, 0, DateTimeKind.Utc));
+    }
+
     public void Dispose()
     {
         _db.Dispose();

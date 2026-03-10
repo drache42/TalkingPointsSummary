@@ -24,7 +24,7 @@ public class CategorizationResult
 /// <summary>
 /// Uses Claude Haiku to categorize messages as newsletter links, direct news, or neither.
 /// </summary>
-public partial class MessageCategorizer
+public partial class MessageCategorizer : IMessageCategorizer
 {
     private static readonly MessageCategorizationPromptBuilder PromptBuilder = new();
 

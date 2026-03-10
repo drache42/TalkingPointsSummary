@@ -1,71 +1,136 @@
+using System.Net;
+using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
+using Moq.Protected;
+using TalkingPointsSummary.Models;
 using TalkingPointsSummary.Services;
 
 namespace TalkingPointsSummary.Tests;
 
 public class TalkingPointsApiClientTests
 {
-    [Fact]
-    public void TalkingPointsMessage_DeserializesCorrectly()
+    private readonly Parent _testParent = new()
     {
-        // Verify DTO field mapping from API JSON structure
-        var message = new TalkingPointsMessage
-        {
-            Id = "abc123",
-            ContactMessageId = "contact-456",
-            Text = "Hello parents!",
-            FromName = "Ms. Smith",
-            From = new TalkingPointsFrom
+        Id = 1,
+        Name = "Test Parent",
+        TalkingPointsToken = "test-token-123",
+        TalkingPointsContactId = "contact-456",
+        EmailRecipients = "test@example.com"
+    };
+
+    private static TalkingPointsApiClient CreateClient(HttpMessageHandler handler)
+    {
+        var httpClient = new HttpClient(handler);
+        return new TalkingPointsApiClient(httpClient, NullLogger<TalkingPointsApiClient>.Instance);
+    }
+
+    private static Mock<HttpMessageHandler> CreateMockHandler(HttpStatusCode statusCode, object? responseBody = null)
+    {
+        var mockHandler = new Mock<HttpMessageHandler>();
+        var responseContent = responseBody != null
+            ? new StringContent(JsonSerializer.Serialize(responseBody), System.Text.Encoding.UTF8, "application/json")
+            : new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
+
+        mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage
             {
-                User = new TalkingPointsUser { Signature = "Ms. Jane Smith" }
-            },
-            ContactInfo = new TalkingPointsContactInfo { StudentName = "Clara" },
-            CreatedAt = new DateTime(2026, 3, 1, 10, 0, 0, DateTimeKind.Utc),
-            DisplayDate = new DateTime(2026, 3, 1, 10, 30, 0, DateTimeKind.Utc)
-        };
+                StatusCode = statusCode,
+                Content = responseContent
+            });
 
-        message.Id.Should().Be("abc123");
-        message.ContactMessageId.Should().Be("contact-456");
-        message.Text.Should().Be("Hello parents!");
-        message.From!.User!.Signature.Should().Be("Ms. Jane Smith");
-        message.ContactInfo!.StudentName.Should().Be("Clara");
-        message.DisplayDate.Should().Be(new DateTime(2026, 3, 1, 10, 30, 0, DateTimeKind.Utc));
+        return mockHandler;
     }
 
     [Fact]
-    public void TalkingPointsMessage_HandlesNullOptionalFields()
+    public async Task FetchMessagesAsync_SendsCorrectUrlAndHeaders()
     {
-        var message = new TalkingPointsMessage
+        HttpRequestMessage? capturedRequest = null;
+        var mockHandler = new Mock<HttpMessageHandler>();
+        mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedRequest = req)
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent("""{"data":{"messages":[]}}""", System.Text.Encoding.UTF8, "application/json")
+            });
+
+        var client = CreateClient(mockHandler.Object);
+        await client.FetchMessagesAsync(_testParent);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.RequestUri!.ToString().Should().Contain("/api/parents/v3/messages/feed");
+        capturedRequest.Headers.GetValues("x-token").Should().ContainSingle().Which.Should().Be("test-token-123");
+        capturedRequest.Headers.GetValues("x-contactid").Should().ContainSingle().Which.Should().Be("contact-456");
+        capturedRequest.Headers.GetValues("x-app-version").Should().ContainSingle().Which.Should().Be("5.0.0");
+        capturedRequest.Headers.GetValues("x-language").Should().ContainSingle().Which.Should().Be("en");
+        capturedRequest.Headers.GetValues("x-mobile-platform").Should().ContainSingle().Which.Should().Be("web");
+    }
+
+    [Fact]
+    public async Task FetchMessagesAsync_SuccessfulResponse_DeserializesCorrectly()
+    {
+        var responseBody = new
         {
-            Id = "abc123"
+            data = new
+            {
+                messages = new[]
+                {
+                    new
+                    {
+                        _id = "msg-001",
+                        contactMessageId = "contact-msg-001",
+                        text = "Hello parents!",
+                        fromName = "Ms. Smith",
+                        from = new { user = new { signature = "Ms. Jane Smith" } },
+                        contactInfo = new { studentName = "Clara" },
+                        createdAt = "2026-03-01T10:00:00Z",
+                        displayDate = "2026-03-01T10:30:00Z"
+                    }
+                }
+            }
         };
 
-        message.Text.Should().BeNull();
-        message.FromName.Should().BeNull();
-        message.From.Should().BeNull();
-        message.ContactInfo.Should().BeNull();
-        message.ContactMessageId.Should().BeNull();
-        message.CreatedAt.Should().BeNull();
-        message.DisplayDate.Should().BeNull();
+        var mockHandler = CreateMockHandler(HttpStatusCode.OK, responseBody);
+        var client = CreateClient(mockHandler.Object);
+
+        var result = await client.FetchMessagesAsync(_testParent);
+
+        result.Should().HaveCount(1);
+        result[0].Id.Should().Be("msg-001");
+        result[0].Text.Should().Be("Hello parents!");
+        result[0].ContactInfo!.StudentName.Should().Be("Clara");
+        result[0].From!.User!.Signature.Should().Be("Ms. Jane Smith");
     }
 
     [Fact]
-    public void TalkingPointsApiResponse_EmptyData_ReturnsEmptyList()
+    public async Task FetchMessagesAsync_EmptyMessages_ReturnsEmptyList()
     {
-        var response = new TalkingPointsApiResponse
-        {
-            Data = new TalkingPointsData { Messages = [] }
-        };
+        var responseBody = new { data = new { messages = Array.Empty<object>() } };
+        var mockHandler = CreateMockHandler(HttpStatusCode.OK, responseBody);
+        var client = CreateClient(mockHandler.Object);
 
-        response.Data.Messages.Should().BeEmpty();
+        var result = await client.FetchMessagesAsync(_testParent);
+
+        result.Should().NotBeNull();
+        result.Should().BeEmpty();
     }
 
     [Fact]
-    public void TalkingPointsApiResponse_NullData_HandledSafely()
+    public async Task FetchMessagesAsync_NonSuccessStatus_Throws()
     {
-        var response = new TalkingPointsApiResponse { Data = null };
-        var messages = response.Data?.Messages ?? [];
+        var mockHandler = CreateMockHandler(HttpStatusCode.Unauthorized);
+        var client = CreateClient(mockHandler.Object);
 
-        messages.Should().BeEmpty();
+        var act = () => client.FetchMessagesAsync(_testParent);
+
+        await act.Should().ThrowAsync<HttpRequestException>();
     }
 }

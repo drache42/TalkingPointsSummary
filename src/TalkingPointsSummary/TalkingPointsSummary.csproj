@@ -8,6 +8,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="TalkingPointsSummary.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Remove="Infrastructure\**" />
     <Content Remove="Infrastructure\**" />
     <EmbeddedResource Remove="Infrastructure\**" />

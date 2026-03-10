@@ -1,8 +1,11 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using TalkingPointsSummary.Data;
 using TalkingPointsSummary.Models;
+using TalkingPointsSummary.Pipeline;
 using TalkingPointsSummary.Services;
 
 namespace TalkingPointsSummary.Tests;
@@ -10,8 +13,14 @@ namespace TalkingPointsSummary.Tests;
 public class PipelineOrchestratorTests : IDisposable
 {
     private readonly AppDbContext _db;
-    private readonly MessageDeduplicator _deduplicator;
-    private readonly MarkdownConverter _markdownConverter;
+    private readonly Mock<ITalkingPointsApiClient> _mockApiClient;
+    private readonly Mock<IMessageDeduplicator> _mockDeduplicator;
+    private readonly Mock<IMessageCategorizer> _mockCategorizer;
+    private readonly Mock<INewsletterScraper> _mockScraper;
+    private readonly Mock<ISummaryGenerator> _mockSummaryGenerator;
+    private readonly Mock<IMarkdownConverter> _mockMarkdownConverter;
+    private readonly Mock<IEmailSender> _mockEmailSender;
+    private readonly PipelineOrchestrator _orchestrator;
     private readonly Parent _testParent;
 
     public PipelineOrchestratorTests()
@@ -30,7 +39,6 @@ public class PipelineOrchestratorTests : IDisposable
             EmailRecipients = "test@example.com"
         };
         _db.Parents.Add(_testParent);
-
         _db.Children.Add(new Child
         {
             ParentId = 1,
@@ -40,112 +48,211 @@ public class PipelineOrchestratorTests : IDisposable
             StartingYear = 2025,
             Emoji = "📚"
         });
-
         _db.SaveChanges();
 
-        _deduplicator = new MessageDeduplicator(_db, NullLogger<MessageDeduplicator>.Instance);
-        _markdownConverter = new MarkdownConverter();
+        _mockApiClient = new Mock<ITalkingPointsApiClient>();
+        _mockDeduplicator = new Mock<IMessageDeduplicator>();
+        _mockCategorizer = new Mock<IMessageCategorizer>();
+        _mockScraper = new Mock<INewsletterScraper>();
+        _mockSummaryGenerator = new Mock<ISummaryGenerator>();
+        _mockMarkdownConverter = new Mock<IMarkdownConverter>();
+        _mockEmailSender = new Mock<IEmailSender>();
+
+        // Default setup: API returns empty, dedup returns empty
+        _mockApiClient.Setup(x => x.FetchMessagesAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        _mockDeduplicator.Setup(x => x.DeduplicateAndSaveAsync(It.IsAny<Parent>(), It.IsAny<List<TalkingPointsMessage>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        _mockDeduplicator.Setup(x => x.GetUnprocessedAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+
+        _orchestrator = new PipelineOrchestrator(
+            _db,
+            _mockApiClient.Object,
+            _mockDeduplicator.Object,
+            _mockCategorizer.Object,
+            _mockScraper.Object,
+            _mockSummaryGenerator.Object,
+            _mockMarkdownConverter.Object,
+            _mockEmailSender.Object,
+            NullLogger<PipelineOrchestrator>.Instance);
     }
 
     [Fact]
-    public async Task Deduplicator_CorrectlyFiltersAndSavesMessages()
+    public async Task RunAsync_SummaryGeneratorReturnsNull_ReturnsEarlyWithoutEmailOrSave()
     {
-        // Pre-populate existing message
-        _db.Messages.Add(new Message
-        {
-            ParentId = _testParent.Id,
-            ExternalMessageId = "existing-001",
-            MessageText = "Old message",
-            SentAt = DateTime.UtcNow,
-            ProcessedAt = DateTime.UtcNow
-        });
-        await _db.SaveChangesAsync();
+        _mockSummaryGenerator.Setup(x => x.GenerateAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
 
-        var apiMessages = new List<TalkingPointsMessage>
-        {
-            new() { Id = "existing-001", Text = "Old message", DisplayDate = DateTime.UtcNow },
-            new() { Id = "new-001", Text = "New message", DisplayDate = DateTime.UtcNow,
-                    ContactInfo = new TalkingPointsContactInfo { StudentName = "Clara" } }
-        };
+        await _orchestrator.RunAsync(_testParent);
 
-        var saved = await _deduplicator.DeduplicateAndSaveAsync(_testParent, apiMessages);
-
-        saved.Should().HaveCount(1);
-        saved[0].ExternalMessageId.Should().Be("new-001");
+        _mockEmailSender.Verify(x => x.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _db.Summaries.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task Deduplicator_ProcessedFlow_WorksEndToEnd()
+    public async Task RunAsync_ProcessMessageThrows_ContinuesProcessingRemainingMessages()
     {
-        // Save a new message
-        var apiMessages = new List<TalkingPointsMessage>
+        var messages = new List<Message>
         {
-            new() { Id = "flow-001", Text = "Test message", DisplayDate = DateTime.UtcNow }
+            new() { Id = 1, ParentId = _testParent.Id, ExternalMessageId = "msg-fail", FromName = "Teacher A", MessageText = "Fail", SentAt = DateTime.UtcNow },
+            new() { Id = 2, ParentId = _testParent.Id, ExternalMessageId = "msg-ok", FromName = "Teacher B", MessageText = "OK", StudentName = "Clara", SentAt = DateTime.UtcNow }
         };
 
-        var saved = await _deduplicator.DeduplicateAndSaveAsync(_testParent, apiMessages);
-        saved.Should().HaveCount(1);
+        _mockDeduplicator.Setup(x => x.GetUnprocessedAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(messages);
 
-        // Get unprocessed
-        var unprocessed = await _deduplicator.GetUnprocessedAsync(_testParent);
-        unprocessed.Should().HaveCount(1);
+        // First message categorization throws
+        _mockCategorizer.Setup(x => x.CategorizeAsync(It.Is<Message>(m => m.ExternalMessageId == "msg-fail"), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("API error"));
 
-        // Mark processed
-        await _deduplicator.MarkProcessedAsync(unprocessed[0]);
+        // Second message categorization succeeds with IsNewsItself
+        _mockCategorizer.Setup(x => x.CategorizeAsync(It.Is<Message>(m => m.ExternalMessageId == "msg-ok"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CategorizationResult { MessageId = "msg-ok", IsNewsItself = true, Summary = "News" });
 
-        // Should be empty now
-        var remaining = await _deduplicator.GetUnprocessedAsync(_testParent);
-        remaining.Should().BeEmpty();
+        _mockSummaryGenerator.Setup(x => x.GenerateAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
+
+        await _orchestrator.RunAsync(_testParent);
+
+        // Second message should still be categorized and processed
+        _mockCategorizer.Verify(x => x.CategorizeAsync(It.Is<Message>(m => m.ExternalMessageId == "msg-ok"), It.IsAny<CancellationToken>()), Times.Once);
+        _mockDeduplicator.Verify(x => x.MarkProcessedAsync(It.Is<Message>(m => m.ExternalMessageId == "msg-ok"), It.IsAny<CancellationToken>()), Times.Once);
+
+        // First message should NOT be marked processed (threw during categorization)
+        _mockDeduplicator.Verify(x => x.MarkProcessedAsync(It.Is<Message>(m => m.ExternalMessageId == "msg-fail"), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task NewsItems_CanBeSavedAndQueried()
+    public async Task RunAsync_HasNewsletterUrl_ScraperReturnsText_SavesNewsletterUrlSourceType()
     {
-        var newsItem = new NewsItem
+        var message = new Message
         {
-            ParentId = _testParent.Id,
-            SourceMessageId = "msg-001",
-            SourceType = SourceType.MessageText,
-            NewsContent = "School picture day is Friday",
-            AiSummary = "Picture day announcement",
-            FromName = "Teacher",
-            StudentName = "Clara",
-            SentAt = DateTime.UtcNow,
-            CreatedAt = DateTime.UtcNow,
-            AnalyzedAt = DateTime.UtcNow
+            Id = 1, ParentId = _testParent.Id, ExternalMessageId = "msg-001",
+            FromName = "Teacher", StudentName = "Clara", MessageText = "Check newsletter",
+            SentAt = new DateTime(2026, 3, 7, 10, 0, 0, DateTimeKind.Utc)
         };
 
-        _db.NewsItems.Add(newsItem);
-        await _db.SaveChangesAsync();
+        _mockDeduplicator.Setup(x => x.GetUnprocessedAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([message]);
 
-        var items = await _db.NewsItems
-            .Where(n => n.ParentId == _testParent.Id)
-            .ToListAsync();
+        _mockCategorizer.Setup(x => x.CategorizeAsync(It.IsAny<Message>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CategorizationResult
+            {
+                MessageId = "msg-001",
+                HasNewsletterUrl = true,
+                NewsletterUrl = "https://www.smore.com/abc",
+                IsNewsItself = false,
+                Summary = "Newsletter link"
+            });
 
-        items.Should().HaveCount(1);
-        items[0].SourceType.Should().Be(SourceType.MessageText);
-        items[0].NewsContent.Should().Be("School picture day is Friday");
+        _mockScraper.Setup(x => x.ScrapeAsync("https://www.smore.com/abc", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("Scraped newsletter content");
+
+        _mockSummaryGenerator.Setup(x => x.GenerateAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
+
+        await _orchestrator.RunAsync(_testParent);
+
+        var savedItem = await _db.NewsItems.SingleAsync();
+        savedItem.SourceType.Should().Be(SourceType.NewsletterUrl);
+        savedItem.NewsContent.Should().Be("Scraped newsletter content");
+        savedItem.NewsletterUrl.Should().Be("https://www.smore.com/abc");
+        savedItem.StudentName.Should().Be("Clara");
+        savedItem.FromName.Should().Be("Teacher");
     }
 
     [Fact]
-    public async Task Summaries_CanBeSavedAndQueried()
+    public async Task RunAsync_HasNewsletterUrl_ScraperReturnsNull_FallsBackToMessageText()
     {
-        var summary = new Summary
+        var message = new Message
         {
-            ParentId = _testParent.Id,
-            Content = "# Weekly Summary\nTest content",
-            CreatedAt = DateTime.UtcNow
+            Id = 1, ParentId = _testParent.Id, ExternalMessageId = "msg-001",
+            FromName = "Teacher", StudentName = "Clara", MessageText = "Original message text",
+            SentAt = DateTime.UtcNow
         };
 
-        _db.Summaries.Add(summary);
-        await _db.SaveChangesAsync();
+        _mockDeduplicator.Setup(x => x.GetUnprocessedAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([message]);
 
-        var summaries = await _db.Summaries
-            .Where(s => s.ParentId == _testParent.Id)
-            .ToListAsync();
+        _mockCategorizer.Setup(x => x.CategorizeAsync(It.IsAny<Message>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CategorizationResult
+            {
+                MessageId = "msg-001",
+                HasNewsletterUrl = true,
+                NewsletterUrl = "https://www.smore.com/abc",
+                IsNewsItself = false,
+                Summary = "Newsletter link"
+            });
 
-        summaries.Should().HaveCount(1);
-        summaries[0].Content.Should().Contain("Weekly Summary");
+        _mockScraper.Setup(x => x.ScrapeAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
+
+        _mockSummaryGenerator.Setup(x => x.GenerateAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
+
+        await _orchestrator.RunAsync(_testParent);
+
+        var savedItem = await _db.NewsItems.SingleAsync();
+        savedItem.SourceType.Should().Be(SourceType.MessageText);
+        savedItem.NewsContent.Should().Be("Original message text");
+    }
+
+    [Fact]
+    public async Task RunAsync_IsNewsItself_SavesMessageTextSourceType()
+    {
+        var message = new Message
+        {
+            Id = 1, ParentId = _testParent.Id, ExternalMessageId = "msg-001",
+            FromName = "Teacher", StudentName = "Clara", MessageText = "Picture day is Friday",
+            SentAt = DateTime.UtcNow
+        };
+
+        _mockDeduplicator.Setup(x => x.GetUnprocessedAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([message]);
+
+        _mockCategorizer.Setup(x => x.CategorizeAsync(It.IsAny<Message>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CategorizationResult
+            {
+                MessageId = "msg-001",
+                HasNewsletterUrl = false,
+                IsNewsItself = true,
+                Summary = "Picture day"
+            });
+
+        _mockSummaryGenerator.Setup(x => x.GenerateAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
+
+        await _orchestrator.RunAsync(_testParent);
+
+        var savedItem = await _db.NewsItems.SingleAsync();
+        savedItem.SourceType.Should().Be(SourceType.MessageText);
+        savedItem.NewsContent.Should().Be("Picture day is Friday");
+    }
+
+    [Fact]
+    public async Task RunAsync_HappyPath_SavesSummaryAndSendsEmail()
+    {
+        _mockDeduplicator.Setup(x => x.GetUnprocessedAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+
+        _mockSummaryGenerator.Setup(x => x.GenerateAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("# Weekly Summary\nContent here");
+
+        _mockMarkdownConverter.Setup(x => x.ToHtml(It.IsAny<string>()))
+            .Returns("<h1>Weekly Summary</h1><p>Content here</p>");
+
+        await _orchestrator.RunAsync(_testParent);
+
+        _mockEmailSender.Verify(x => x.SendAsync(
+            "test@example.com",
+            "Talking Points Summary V2",
+            "<h1>Weekly Summary</h1><p>Content here</p>",
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        var savedSummary = await _db.Summaries.SingleAsync();
+        savedSummary.Content.Should().Be("# Weekly Summary\nContent here");
+        savedSummary.ParentId.Should().Be(_testParent.Id);
     }
 
     public void Dispose()

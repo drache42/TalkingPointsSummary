@@ -9,7 +9,7 @@ namespace TalkingPointsSummary.Services;
 /// <summary>
 /// Fetches messages from the TalkingPoints parent messaging API.
 /// </summary>
-public class TalkingPointsApiClient
+public class TalkingPointsApiClient : ITalkingPointsApiClient
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<TalkingPointsApiClient> _logger;

@@ -5,7 +5,7 @@ namespace TalkingPointsSummary.Services;
 /// <summary>
 /// Converts Markdown to HTML using Markdig.
 /// </summary>
-public class MarkdownConverter
+public class MarkdownConverter : IMarkdownConverter
 {
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()

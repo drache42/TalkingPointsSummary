@@ -10,7 +10,7 @@ namespace TalkingPointsSummary.Services;
 /// <summary>
 /// Sends HTML email via SMTP using MailKit.
 /// </summary>
-public class EmailSender
+public class EmailSender : IEmailSender
 {
     private readonly AppSettings _settings;
     private readonly ILogger<EmailSender> _logger;

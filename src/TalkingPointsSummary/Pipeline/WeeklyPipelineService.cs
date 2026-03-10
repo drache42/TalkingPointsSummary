@@ -101,7 +101,7 @@ public class WeeklyPipelineService : BackgroundService
         _logger.LogInformation("Weekly pipeline service stopped");
     }
 
-    private bool ShouldRun(DateTime now)
+    internal bool ShouldRun(DateTime now)
     {
         // Check day of week and hour
         if ((int)now.DayOfWeek != _settings.ScheduleDayOfWeek)

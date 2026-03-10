@@ -13,24 +13,24 @@ namespace TalkingPointsSummary.Pipeline;
 public class PipelineOrchestrator
 {
     private readonly AppDbContext _db;
-    private readonly TalkingPointsApiClient _apiClient;
-    private readonly MessageDeduplicator _deduplicator;
-    private readonly MessageCategorizer _categorizer;
-    private readonly NewsletterScraper _scraper;
-    private readonly SummaryGenerator _summaryGenerator;
-    private readonly MarkdownConverter _markdownConverter;
-    private readonly EmailSender _emailSender;
+    private readonly ITalkingPointsApiClient _apiClient;
+    private readonly IMessageDeduplicator _deduplicator;
+    private readonly IMessageCategorizer _categorizer;
+    private readonly INewsletterScraper _scraper;
+    private readonly ISummaryGenerator _summaryGenerator;
+    private readonly IMarkdownConverter _markdownConverter;
+    private readonly IEmailSender _emailSender;
     private readonly ILogger<PipelineOrchestrator> _logger;
 
     public PipelineOrchestrator(
         AppDbContext db,
-        TalkingPointsApiClient apiClient,
-        MessageDeduplicator deduplicator,
-        MessageCategorizer categorizer,
-        NewsletterScraper scraper,
-        SummaryGenerator summaryGenerator,
-        MarkdownConverter markdownConverter,
-        EmailSender emailSender,
+        ITalkingPointsApiClient apiClient,
+        IMessageDeduplicator deduplicator,
+        IMessageCategorizer categorizer,
+        INewsletterScraper scraper,
+        ISummaryGenerator summaryGenerator,
+        IMarkdownConverter markdownConverter,
+        IEmailSender emailSender,
         ILogger<PipelineOrchestrator> logger)
     {
         _db = db;

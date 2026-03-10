@@ -1,10 +1,68 @@
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Moq;
+using TalkingPointsSummary.Configuration;
+using TalkingPointsSummary.Data;
+using TalkingPointsSummary.Models;
 using TalkingPointsSummary.Pipeline;
+using TalkingPointsSummary.Services;
 
 namespace TalkingPointsSummary.Tests;
 
-public class WeeklyPipelineServiceTests
+public class WeeklyPipelineServiceTests : IDisposable
 {
+    private readonly string _dbName = Guid.NewGuid().ToString();
+    private readonly AppSettings _settings;
+
+    public WeeklyPipelineServiceTests()
+    {
+        _settings = new AppSettings
+        {
+            ScheduleDayOfWeek = 1, // Monday
+            ScheduleHour = 8
+        };
+    }
+
+    private WeeklyPipelineService CreateService(IServiceScopeFactory? scopeFactory = null)
+    {
+        scopeFactory ??= CreateScopeFactory();
+        return new WeeklyPipelineService(
+            scopeFactory,
+            Options.Create(_settings),
+            NullLogger<WeeklyPipelineService>.Instance);
+    }
+
+    private IServiceScopeFactory CreateScopeFactory(Action<IServiceCollection>? configure = null)
+    {
+        var services = new ServiceCollection();
+        services.AddDbContext<AppDbContext>(options =>
+            options.UseInMemoryDatabase(_dbName));
+
+        // Register mock service dependencies for PipelineOrchestrator
+        services.AddSingleton(Options.Create(_settings));
+        var mockApiClient = new Mock<ITalkingPointsApiClient>();
+        mockApiClient.Setup(x => x.FetchMessagesAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        services.AddSingleton(mockApiClient.Object);
+        services.AddSingleton(Mock.Of<IMessageDeduplicator>());
+        services.AddSingleton(Mock.Of<IMessageCategorizer>());
+        services.AddSingleton(Mock.Of<INewsletterScraper>());
+        services.AddSingleton(Mock.Of<ISummaryGenerator>());
+        services.AddSingleton(Mock.Of<IMarkdownConverter>());
+        services.AddSingleton(Mock.Of<IEmailSender>());
+        services.AddSingleton<ILogger<PipelineOrchestrator>>(NullLogger<PipelineOrchestrator>.Instance);
+        services.AddScoped<PipelineOrchestrator>();
+
+        configure?.Invoke(services);
+
+        var provider = services.BuildServiceProvider();
+        return provider.GetRequiredService<IServiceScopeFactory>();
+    }
+
     [Theory]
     [InlineData(DayOfWeek.Monday, 8, 1, 8, true)]     // Monday 8 AM, schedule Monday 8 = should run
     [InlineData(DayOfWeek.Monday, 9, 1, 8, false)]    // Monday 9 AM, schedule Monday 8 = wrong hour
@@ -13,6 +71,10 @@ public class WeeklyPipelineServiceTests
     [InlineData(DayOfWeek.Monday, 8, 1, 9, false)]    // Monday 8 AM, schedule Monday 9 = wrong hour
     public void ShouldRun_RespectsSchedule(DayOfWeek dayOfWeek, int hour, int scheduledDay, int scheduledHour, bool expected)
     {
+        _settings.ScheduleDayOfWeek = scheduledDay;
+        _settings.ScheduleHour = scheduledHour;
+        var service = CreateService();
+
         // Find a date that falls on the specified day of week
         var baseDate = new DateTime(2026, 3, 2, hour, 30, 0, DateTimeKind.Utc); // March 2, 2026 is Monday
         while (baseDate.DayOfWeek != dayOfWeek)
@@ -21,41 +83,116 @@ public class WeeklyPipelineServiceTests
         }
         baseDate = new DateTime(baseDate.Year, baseDate.Month, baseDate.Day, hour, 30, 0, DateTimeKind.Utc);
 
-        var shouldRun = ShouldRunCheck(baseDate, scheduledDay, scheduledHour, lastRunDate: null);
+        var shouldRun = service.ShouldRun(baseDate);
         shouldRun.Should().Be(expected);
     }
 
     [Fact]
-    public void ShouldRun_DoesNotRunTwiceSameDay()
+    public async Task TryRunFullPipelineAsync_AlreadyRunning_ReturnsAlreadyRunning()
     {
-        var now = new DateTime(2026, 3, 2, 8, 30, 0, DateTimeKind.Utc); // Monday 8 AM
-        var shouldRun = ShouldRunCheck(now, scheduledDay: 1, scheduledHour: 8, lastRunDate: now.Date);
-        shouldRun.Should().BeFalse();
+        var tcs = new TaskCompletionSource();
+        var slowApiClient = new Mock<ITalkingPointsApiClient>();
+        slowApiClient.Setup(x => x.FetchMessagesAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                await tcs.Task;
+                return new List<TalkingPointsMessage>();
+            });
+
+        var scopeFactory = CreateScopeFactory(services =>
+        {
+            // Replace the mock with a slow one
+            services.AddSingleton(slowApiClient.Object);
+        });
+
+        // Seed an active parent so the pipeline actually calls the orchestrator
+        using (var scope = scopeFactory.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Parents.Add(new Parent
+            {
+                Name = "Test", TalkingPointsToken = "t", TalkingPointsContactId = "c",
+                EmailRecipients = "e@e.com", IsActive = true
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = CreateService(scopeFactory);
+
+        // Start first run (will block on slowApiClient)
+        var firstRun = service.TryRunFullPipelineAsync("test");
+
+        // Give it a moment to acquire the lock
+        await Task.Delay(100);
+
+        // Second call should return AlreadyRunning
+        var secondResult = await service.TryRunFullPipelineAsync("test");
+        secondResult.Should().Be(PipelineRunStatus.AlreadyRunning);
+
+        // Clean up - release the first run
+        tcs.SetResult();
+        var firstResult = await firstRun;
+        firstResult.Should().Be(PipelineRunStatus.Completed);
     }
 
     [Fact]
-    public void ShouldRun_RunsOnNextWeek()
+    public async Task TryRunFullPipelineAsync_ParentNotFound_ReturnsParentNotFound()
     {
-        var now = new DateTime(2026, 3, 9, 8, 30, 0, DateTimeKind.Utc); // Next Monday 8 AM
-        var lastRun = new DateTime(2026, 3, 2); // Last Monday
-        var shouldRun = ShouldRunCheck(now, scheduledDay: 1, scheduledHour: 8, lastRunDate: lastRun);
-        shouldRun.Should().BeTrue();
+        var scopeFactory = CreateScopeFactory();
+
+        // No parents seeded → parentId 999 should not be found
+        var service = CreateService(scopeFactory);
+        var result = await service.TryRunFullPipelineAsync("test", parentId: 999, CancellationToken.None);
+
+        result.Should().Be(PipelineRunStatus.ParentNotFound);
     }
 
-    /// <summary>
-    /// Mirrors the ShouldRun logic from WeeklyPipelineService for testability.
-    /// </summary>
-    private static bool ShouldRunCheck(DateTime now, int scheduledDay, int scheduledHour, DateTime? lastRunDate)
+    [Fact]
+    public async Task IsRunInProgress_TrueWhileRunning_FalseAfterComplete()
     {
-        if ((int)now.DayOfWeek != scheduledDay)
-            return false;
+        var tcs = new TaskCompletionSource();
+        var slowApiClient = new Mock<ITalkingPointsApiClient>();
+        slowApiClient.Setup(x => x.FetchMessagesAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                await tcs.Task;
+                return new List<TalkingPointsMessage>();
+            });
 
-        if (now.Hour != scheduledHour)
-            return false;
+        var scopeFactory = CreateScopeFactory(services =>
+        {
+            services.AddSingleton(slowApiClient.Object);
+        });
 
-        if (lastRunDate.HasValue && lastRunDate.Value == now.Date)
-            return false;
+        // Seed parent
+        using (var scope = scopeFactory.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Parents.Add(new Parent
+            {
+                Name = "Test", TalkingPointsToken = "t", TalkingPointsContactId = "c",
+                EmailRecipients = "e@e.com", IsActive = true
+            });
+            await db.SaveChangesAsync();
+        }
 
-        return true;
+        var service = CreateService(scopeFactory);
+
+        service.IsRunInProgress.Should().BeFalse();
+
+        var runTask = service.TryRunFullPipelineAsync("test");
+        await Task.Delay(100);
+
+        service.IsRunInProgress.Should().BeTrue();
+
+        tcs.SetResult();
+        await runTask;
+
+        service.IsRunInProgress.Should().BeFalse();
+    }
+
+    public void Dispose()
+    {
+        // InMemory databases are cleaned up when the last connection closes
     }
 }

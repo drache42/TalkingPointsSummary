@@ -9,7 +9,7 @@ namespace TalkingPointsSummary.Services;
 /// <summary>
 /// Scrapes newsletter content via an external Browserless service.
 /// </summary>
-public class NewsletterScraper
+public class NewsletterScraper : INewsletterScraper
 {
     private readonly HttpClient _httpClient;
     private readonly AppSettings _settings;

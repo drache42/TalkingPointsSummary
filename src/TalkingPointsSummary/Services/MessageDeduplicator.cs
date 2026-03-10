@@ -8,7 +8,7 @@ namespace TalkingPointsSummary.Services;
 /// <summary>
 /// Filters out messages that already exist in the database and saves new ones.
 /// </summary>
-public class MessageDeduplicator
+public class MessageDeduplicator : IMessageDeduplicator
 {
     private readonly AppDbContext _db;
     private readonly ILogger<MessageDeduplicator> _logger;

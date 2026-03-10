@@ -21,14 +21,14 @@ public class StartupValidator
 {
     private readonly AppSettings _settings;
     private readonly AppDbContext _db;
-    private readonly TalkingPointsApiClient _talkingPointsClient;
+    private readonly ITalkingPointsApiClient _talkingPointsClient;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<StartupValidator> _logger;
 
     public StartupValidator(
         IOptions<AppSettings> settings,
         AppDbContext db,
-        TalkingPointsApiClient talkingPointsClient,
+        ITalkingPointsApiClient talkingPointsClient,
         IHttpClientFactory httpClientFactory,
         ILogger<StartupValidator> logger)
     {

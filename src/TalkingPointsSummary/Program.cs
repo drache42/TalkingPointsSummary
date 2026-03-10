@@ -145,17 +145,17 @@ internal sealed class Program
             options.UseNpgsql(appSettings.ConnectionString,
                 npgsql => npgsql.MigrationsAssembly(typeof(Program).Assembly.GetName().Name ?? "TalkingPointsSummary")));
 
-        services.AddHttpClient<TalkingPointsApiClient>();
-        services.AddHttpClient<MessageCategorizer>();
-        services.AddHttpClient<NewsletterScraper>(client =>
+        services.AddHttpClient<ITalkingPointsApiClient, TalkingPointsApiClient>();
+        services.AddHttpClient<IMessageCategorizer, MessageCategorizer>();
+        services.AddHttpClient<INewsletterScraper, NewsletterScraper>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(90);
         });
-        services.AddHttpClient<SummaryGenerator>();
+        services.AddHttpClient<ISummaryGenerator, SummaryGenerator>();
 
-        services.AddScoped<MessageDeduplicator>();
-        services.AddSingleton<MarkdownConverter>();
-        services.AddScoped<EmailSender>();
+        services.AddScoped<IMessageDeduplicator, MessageDeduplicator>();
+        services.AddSingleton<IMarkdownConverter, MarkdownConverter>();
+        services.AddScoped<IEmailSender, EmailSender>();
         services.AddScoped<PipelineOrchestrator>();
         services.AddSingleton<WeeklyPipelineService>();
         services.AddScoped<StartupValidator>();
