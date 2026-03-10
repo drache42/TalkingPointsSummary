@@ -191,30 +191,27 @@ public class WeeklyPipelineServiceTests : IDisposable
         }
 
         var service = CreateService(scopeFactory);
-        var firstResult = await service.TryStartPipelineAsync("test", CancellationToken.None);
+        var firstResult = await service.TryStartPipelineAsync("test", parentId: null, CancellationToken.None);
 
         firstResult.Should().Be(PipelineStartStatus.Started);
         service.IsRunInProgress.Should().BeTrue();
 
-        var secondResult = await service.TryStartPipelineAsync("test", CancellationToken.None);
+        var secondResult = await service.TryStartPipelineAsync("test", parentId: null, CancellationToken.None);
         secondResult.Should().Be(PipelineStartStatus.AlreadyRunning);
 
         tcs.SetResult();
 
-        await AssertionExtensions.ShouldAsync(async () =>
+        for (var attempt = 0; attempt < 20; attempt++)
         {
-            for (var attempt = 0; attempt < 20; attempt++)
+            if (!service.IsRunInProgress)
             {
-                if (!service.IsRunInProgress)
-                {
-                    return;
-                }
-
-                await Task.Delay(50);
+                break;
             }
 
-            service.IsRunInProgress.Should().BeFalse();
-        }).NotThrowAsync();
+            await Task.Delay(50);
+        }
+
+        service.IsRunInProgress.Should().BeFalse();
     }
 
     [Fact]
