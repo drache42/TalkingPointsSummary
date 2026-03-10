@@ -9,10 +9,18 @@ using TalkingPointsSummary.Services;
 
 namespace TalkingPointsSummary.Admin.Configuration;
 
+/// <summary>
+/// Registers services and feature flags used by the admin application.
+/// </summary>
 public static class AdminServiceConfiguration
 {
     private const string TalkingPointsConnectionName = "TalkingPoints";
 
+    /// <summary>
+    /// Registers database access, CRUD services, and the debug pipeline client.
+    /// </summary>
+    /// <param name="services">Service collection to configure.</param>
+    /// <param name="configuration">Application configuration source.</param>
     public static void ConfigureApplicationServices(IServiceCollection services, IConfiguration configuration)
     {
         services.AddSingleton(TimeProvider.System);
@@ -41,9 +49,18 @@ public static class AdminServiceConfiguration
         });
     }
 
+    /// <summary>
+    /// Returns whether admin debug features are enabled.
+    /// </summary>
+    /// <param name="configuration">Application configuration source.</param>
     public static bool AreDebugFeaturesEnabled(IConfiguration configuration)
         => DebugFeaturesOptions.IsEnabled(configuration);
 
+    /// <summary>
+    /// Returns whether a route should be blocked because debug features are disabled.
+    /// </summary>
+    /// <param name="path">Request path being evaluated.</param>
+    /// <param name="debugFeaturesEnabled">Whether debug features are enabled.</param>
     public static bool ShouldBlockDebugRoute(PathString path, bool debugFeaturesEnabled)
         => !debugFeaturesEnabled && path.StartsWithSegments("/debug");
 }

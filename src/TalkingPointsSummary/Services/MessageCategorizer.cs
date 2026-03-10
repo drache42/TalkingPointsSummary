@@ -13,10 +13,29 @@ namespace TalkingPointsSummary.Services;
 /// </summary>
 public class CategorizationResult
 {
+    /// <summary>
+    /// Message identifier associated with the categorization result.
+    /// </summary>
     public string MessageId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Whether the message contains a newsletter URL.
+    /// </summary>
     public bool HasNewsletterUrl { get; set; }
+
+    /// <summary>
+    /// Newsletter URL returned by the model, when present.
+    /// </summary>
     public string? NewsletterUrl { get; set; }
+
+    /// <summary>
+    /// Whether the message itself should be treated as direct news.
+    /// </summary>
     public bool IsNewsItself { get; set; }
+
+    /// <summary>
+    /// Short AI-generated summary of the message content.
+    /// </summary>
     public string Summary { get; set; } = string.Empty;
 }
 
@@ -31,6 +50,12 @@ public partial class MessageCategorizer : IMessageCategorizer
     private readonly AnthropicOptions _anthropic;
     private readonly ILogger<MessageCategorizer> _logger;
 
+    /// <summary>
+    /// Initializes a message categorizer that calls Anthropic.
+    /// </summary>
+    /// <param name="httpClient">HTTP client used to call Anthropic.</param>
+    /// <param name="anthropic">Anthropic API configuration.</param>
+    /// <param name="logger">Logger used for categorization diagnostics.</param>
     public MessageCategorizer(
         HttpClient httpClient,
         IOptions<AnthropicOptions> anthropic,
@@ -41,6 +66,11 @@ public partial class MessageCategorizer : IMessageCategorizer
         _logger = logger;
     }
 
+    /// <summary>
+    /// Categorizes a stored message using Anthropic and normalizes the response.
+    /// </summary>
+    /// <param name="message">Message to categorize.</param>
+    /// <param name="ct">Token used to cancel the request.</param>
     public async Task<CategorizationResult> CategorizeAsync(Message message, CancellationToken ct = default)
     {
         _logger.LogInformation("Categorizing message {MessageId} from {FromName}",

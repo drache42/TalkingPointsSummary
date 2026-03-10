@@ -4,8 +4,14 @@ using TalkingPointsSummary.Services;
 
 namespace TalkingPointsSummary.Tests;
 
+/// <summary>
+/// Verifies prompt construction for weekly summary generation.
+/// </summary>
 public class SummaryPromptBuilderTests
 {
+    /// <summary>
+    /// Verifies that child, school-wide, and date-grouped sections include school context.
+    /// </summary>
     [Fact]
     public void Build_IncludesSchoolInChildHeadersAndSchoolGroupedDateSections()
     {
@@ -40,6 +46,9 @@ public class SummaryPromptBuilderTests
         prompt.Should().Contain("- **[Date]** – [Event] ([Time if applicable])");
     }
 
+    /// <summary>
+    /// Verifies that recent news and previous summaries are expanded into the prompt.
+    /// </summary>
     [Fact]
     public void Build_ExpandsRecentNewsAndPreviousSummaries()
     {
@@ -89,6 +98,9 @@ public class SummaryPromptBuilderTests
         prompt.Should().Contain("Earlier summary");
     }
 
+    /// <summary>
+    /// Verifies that the previous-summary section renders `None` when no summaries exist.
+    /// </summary>
     [Fact]
     public void Build_EmptyPreviousSummaries_ReturnsNone()
     {
@@ -99,6 +111,9 @@ public class SummaryPromptBuilderTests
         prompt.Should().Be("Previous: None");
     }
 
+    /// <summary>
+    /// Verifies that child-specific sections remain empty when no children are provided.
+    /// </summary>
     [Fact]
     public void Build_EmptyChildrenList_ProducesNoChildSections()
     {
@@ -112,6 +127,9 @@ public class SummaryPromptBuilderTests
         prompt.Should().Contain("Children: ");
     }
 
+    /// <summary>
+    /// Verifies that all supported template tokens are replaced during prompt generation.
+    /// </summary>
     [Fact]
     public void Build_AllSevenTokensAreReplaced()
     {

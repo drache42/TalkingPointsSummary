@@ -9,20 +9,37 @@ using TalkingPointsSummary.Services;
 
 namespace TalkingPointsSummary.IntegrationTests;
 
+/// <summary>
+/// End-to-end integration tests for the full weekly pipeline.
+/// </summary>
 [Collection("Integration")]
 [Trait("Category", "Integration")]
 public class PipelineEndToEndTests : IAsyncLifetime
 {
     private readonly IntegrationTestFixture _fixture;
 
+    /// <summary>
+    /// Initializes a new end-to-end pipeline test suite.
+    /// </summary>
+    /// <param name="fixture">Shared integration-test fixture.</param>
     public PipelineEndToEndTests(IntegrationTestFixture fixture)
     {
         _fixture = fixture;
     }
 
+    /// <summary>
+    /// Resets shared test state before each test.
+    /// </summary>
     public async Task InitializeAsync() => await _fixture.ResetAsync();
+
+    /// <summary>
+    /// Completes per-test cleanup.
+    /// </summary>
     public Task DisposeAsync() => Task.CompletedTask;
 
+    /// <summary>
+    /// Verifies that the happy path sends email and saves processed data.
+    /// </summary>
     [Fact]
     public async Task FullPipeline_HappyPath_SendsEmailAndSavesSummary()
     {
@@ -98,6 +115,9 @@ public class PipelineEndToEndTests : IAsyncLifetime
         htmlBody.Should().Contain("Field trip to the museum on Friday.");
     }
 
+    /// <summary>
+    /// Verifies that duplicate messages are not reprocessed on later runs.
+    /// </summary>
     [Fact]
     public async Task FullPipeline_Deduplication_DoesNotReprocessExistingMessages()
     {
@@ -150,6 +170,9 @@ public class PipelineEndToEndTests : IAsyncLifetime
         mailCount.Should().Be(2);
     }
 
+    /// <summary>
+    /// Verifies that one message can create both direct-message and newsletter news items.
+    /// </summary>
     [Fact]
     public async Task FullPipeline_MessageHasNewsAndNewsletterLink_SavesBothSourceTypes()
     {
@@ -185,6 +208,9 @@ public class PipelineEndToEndTests : IAsyncLifetime
             .Which.NewsContent.Should().Be("Full schedule and logistics");
     }
 
+    /// <summary>
+    /// Verifies that rerunning an unprocessed message only adds the missing source type.
+    /// </summary>
     [Fact]
     public async Task FullPipeline_UnprocessedMessageWithExistingNewsletterItem_AddsOnlyMissingSourceType()
     {
@@ -249,6 +275,9 @@ public class PipelineEndToEndTests : IAsyncLifetime
         message.ProcessedAt.Should().NotBeNull();
     }
 
+    /// <summary>
+    /// Verifies that persistence failures roll back news-item writes and processed state.
+    /// </summary>
     [Fact]
     public async Task FullPipeline_SaveFailure_RollsBackNewsItemsAndProcessedState()
     {
@@ -283,6 +312,9 @@ public class PipelineEndToEndTests : IAsyncLifetime
         message.ProcessedAt.Should().BeNull();
     }
 
+    /// <summary>
+    /// Verifies that scraper failures fall back to the original message text.
+    /// </summary>
     [Fact]
     public async Task FullPipeline_NewsletterScraperFails_FallsBackToMessageText()
     {
@@ -316,6 +348,9 @@ public class PipelineEndToEndTests : IAsyncLifetime
         newsItems[0].NewsContent.Should().Be("Please read the newsletter for upcoming events");
     }
 
+    /// <summary>
+    /// Verifies that an empty feed completes without creating side effects.
+    /// </summary>
     [Fact]
     public async Task FullPipeline_EmptyFeed_CompletesWithoutSideEffects()
     {
@@ -341,6 +376,9 @@ public class PipelineEndToEndTests : IAsyncLifetime
         mailCount.Should().Be(0);
     }
 
+    /// <summary>
+    /// Verifies that non-news messages do not produce summaries or email.
+    /// </summary>
     [Fact]
     public async Task FullPipeline_NoNewsMessages_NoEmailSent()
     {
@@ -377,6 +415,9 @@ public class PipelineEndToEndTests : IAsyncLifetime
         mailCount.Should().Be(0);
     }
 
+    /// <summary>
+    /// Verifies that invalid categorization JSON falls back to treating the message as news.
+    /// </summary>
     [Fact]
     public async Task FullPipeline_AnthropicReturnsInvalidJson_FallsBackToIsNewsItself()
     {
@@ -407,6 +448,9 @@ public class PipelineEndToEndTests : IAsyncLifetime
         newsItems.Should().HaveCount(1);
     }
 
+    /// <summary>
+    /// Verifies that one categorization failure does not prevent other messages from succeeding.
+    /// </summary>
     [Fact]
     public async Task FullPipeline_MultipleMessages_OneCategorizationFails_OthersSucceed()
     {

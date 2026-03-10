@@ -13,6 +13,10 @@ namespace TalkingPointsSummary.Data;
 /// </summary>
 public class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbContext>
 {
+    /// <summary>
+    /// Creates the design-time database context used by Entity Framework tooling.
+    /// </summary>
+    /// <param name="args">Command-line arguments supplied by the tooling host.</param>
     public AppDbContext CreateDbContext(string[] args)
     {
         var environmentName = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")

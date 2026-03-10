@@ -22,6 +22,15 @@ public class SummaryGenerator : ISummaryGenerator
     private readonly TimeProvider _timeProvider;
     private readonly SummaryPromptBuilder _promptBuilder;
 
+    /// <summary>
+    /// Initializes a summary generator that uses Anthropic to draft weekly summaries.
+    /// </summary>
+    /// <param name="httpClient">HTTP client used to call Anthropic.</param>
+    /// <param name="db">Database context used to load news, summaries, and children.</param>
+    /// <param name="anthropic">Anthropic API configuration.</param>
+    /// <param name="logger">Logger used for generation diagnostics.</param>
+    /// <param name="gradeCalculator">Grade calculator used when building the prompt.</param>
+    /// <param name="timeProvider">Optional time provider used to define the summary window.</param>
     public SummaryGenerator(
         HttpClient httpClient,
         AppDbContext db,

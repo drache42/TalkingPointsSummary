@@ -1,0 +1,6 @@
+<Project>
+  <!-- Late-evaluated suppression for public test members required by xUnit discovery; IsTestProject is not available in Directory.Build.props. -->
+  <PropertyGroup Condition="'$(IsTestProject)' == 'true'">
+    <NoWarn>$(NoWarn);CS1573;CS1587;CS1591</NoWarn>
+  </PropertyGroup>
+</Project>

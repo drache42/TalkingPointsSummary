@@ -2,6 +2,9 @@ using TalkingPointsSummary.Models;
 
 namespace TalkingPointsSummary.Services;
 
+/// <summary>
+/// Builds the AI prompt used to categorize incoming messages.
+/// </summary>
 public sealed class MessageCategorizationPromptBuilder
 {
     private const string FromNameToken = "{{FROM_NAME}}";
@@ -13,11 +16,18 @@ public sealed class MessageCategorizationPromptBuilder
 
     private readonly string _template;
 
+    /// <summary>
+    /// Initializes a prompt builder with the default categorization template.
+    /// </summary>
     public MessageCategorizationPromptBuilder()
         : this(DefaultTemplate.Value)
     {
     }
 
+    /// <summary>
+    /// Initializes a prompt builder with a custom template.
+    /// </summary>
+    /// <param name="template">Template text containing the supported tokens.</param>
     public MessageCategorizationPromptBuilder(string template)
     {
         _template = string.IsNullOrWhiteSpace(template)
@@ -25,6 +35,10 @@ public sealed class MessageCategorizationPromptBuilder
             : template;
     }
 
+    /// <summary>
+    /// Builds a categorization prompt for a stored message.
+    /// </summary>
+    /// <param name="message">Message to describe in the prompt.</param>
     public string Build(Message message)
     {
         var prompt = _template;

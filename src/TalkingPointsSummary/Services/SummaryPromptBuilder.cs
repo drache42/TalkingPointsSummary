@@ -3,6 +3,9 @@ using TalkingPointsSummary.Models;
 
 namespace TalkingPointsSummary.Services;
 
+/// <summary>
+/// Builds the Anthropic prompt used to generate a weekly summary from recent news.
+/// </summary>
 public sealed class SummaryPromptBuilder
 {
     private const string TodayToken = "{{TODAY}}";
@@ -18,21 +21,37 @@ public sealed class SummaryPromptBuilder
     private readonly string _template;
     private readonly IGradeCalculator _gradeCalculator;
 
+    /// <summary>
+    /// Initializes a prompt builder with the default template and grade calculator.
+    /// </summary>
     public SummaryPromptBuilder()
         : this(DefaultTemplate.Value, new GradeCalculator())
     {
     }
 
+    /// <summary>
+    /// Initializes a prompt builder with the default template and a supplied grade calculator.
+    /// </summary>
+    /// <param name="gradeCalculator">Grade calculator used when rendering child context.</param>
     public SummaryPromptBuilder(IGradeCalculator gradeCalculator)
         : this(DefaultTemplate.Value, gradeCalculator)
     {
     }
 
+    /// <summary>
+    /// Initializes a prompt builder with a custom template.
+    /// </summary>
+    /// <param name="template">Template text containing the supported tokens.</param>
     public SummaryPromptBuilder(string template)
         : this(template, new GradeCalculator())
     {
     }
 
+    /// <summary>
+    /// Initializes a prompt builder with a custom template and grade calculator.
+    /// </summary>
+    /// <param name="template">Template text containing the supported tokens.</param>
+    /// <param name="gradeCalculator">Grade calculator used when rendering child context.</param>
     public SummaryPromptBuilder(string template, IGradeCalculator gradeCalculator)
     {
         _template = string.IsNullOrWhiteSpace(template)
@@ -41,6 +60,13 @@ public sealed class SummaryPromptBuilder
         _gradeCalculator = gradeCalculator;
     }
 
+    /// <summary>
+    /// Builds the final prompt text by filling the template with current context and recent content.
+    /// </summary>
+    /// <param name="now">Current date used for prompt tokens and grade labels.</param>
+    /// <param name="children">Children included in the summary.</param>
+    /// <param name="newsItems">Recent news items available for summarization.</param>
+    /// <param name="previousSummaries">Recent summaries used as historical context.</param>
     public string Build(
         DateTime now,
         List<Child> children,

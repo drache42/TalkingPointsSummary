@@ -10,9 +10,60 @@ using TalkingPointsSummary.Models;
 
 namespace TalkingPointsSummary.Services;
 
-public enum CheckStatus { Pass, Warn, Fail }
+/// <summary>
+/// Severity assigned to an individual startup validation check.
+/// </summary>
+public enum CheckStatus
+{
+    /// <summary>
+    /// The check passed.
+    /// </summary>
+    Pass,
 
-public record ValidationCheckResult(string Name, CheckStatus Status, string Detail);
+    /// <summary>
+    /// The check completed with a warning.
+    /// </summary>
+    Warn,
+
+    /// <summary>
+    /// The check failed.
+    /// </summary>
+    Fail
+}
+
+/// <summary>
+/// Result returned by a single startup validation check.
+/// </summary>
+public record ValidationCheckResult
+{
+    /// <summary>
+    /// Initializes a new validation check result.
+    /// </summary>
+    /// <param name="name">Display name of the check.</param>
+    /// <param name="status">Severity assigned to the check result.</param>
+    /// <param name="detail">Human-readable detail for the result.</param>
+    public ValidationCheckResult(string name, CheckStatus status, string detail)
+    {
+        Name = name;
+        Status = status;
+        Detail = detail;
+    }
+
+    /// <summary>
+    /// Display name of the check.
+    /// </summary>
+    public string Name { get; init; }
+
+    /// <summary>
+    /// Severity assigned to the result.
+    /// </summary>
+    public CheckStatus Status { get; init; }
+
+    /// <summary>
+    /// Human-readable detail for the result.
+    /// </summary>
+    public string Detail { get; init; }
+}
 
 /// <summary>
 /// Validates all required secrets and external service connections before the worker starts.
@@ -27,6 +78,16 @@ public class StartupValidator
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<StartupValidator> _logger;
 
+    /// <summary>
+    /// Initializes a startup validator for required configuration and external dependencies.
+    /// </summary>
+    /// <param name="anthropic">Anthropic configuration.</param>
+    /// <param name="browserless">Browserless configuration.</param>
+    /// <param name="smtp">SMTP configuration.</param>
+    /// <param name="db">Database context used to verify connectivity and migrations.</param>
+    /// <param name="talkingPointsClient">TalkingPoints client used to probe API access.</param>
+    /// <param name="httpClientFactory">Factory used to create probe HTTP clients.</param>
+    /// <param name="logger">Logger used for validation diagnostics.</param>
     public StartupValidator(
         IOptions<AnthropicOptions> anthropic,
         IOptions<BrowserlessOptions> browserless,
@@ -45,6 +106,10 @@ public class StartupValidator
         _logger = logger;
     }
 
+    /// <summary>
+    /// Runs all startup validation checks and returns their results.
+    /// </summary>
+    /// <param name="ct">Token used to cancel validation.</param>
     public async Task<List<ValidationCheckResult>> RunAllChecksAsync(CancellationToken ct = default)
     {
         var results = new List<ValidationCheckResult>

@@ -3,17 +3,51 @@ using TalkingPointsSummary.Models;
 
 namespace TalkingPointsSummary.Data;
 
+/// <summary>
+/// Entity Framework database context for the TalkingPoints summary domain.
+/// </summary>
 public class AppDbContext : DbContext
 {
+    /// <summary>
+    /// Initializes a new database context instance.
+    /// </summary>
+    /// <param name="options">Configured Entity Framework options for the context.</param>
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
+    /// <summary>
+    /// Parent records managed by the application.
+    /// </summary>
     public DbSet<Parent> Parents => Set<Parent>();
+
+    /// <summary>
+    /// Child records associated with parents.
+    /// </summary>
     public DbSet<Child> Children => Set<Child>();
+
+    /// <summary>
+    /// Messages fetched from TalkingPoints.
+    /// </summary>
     public DbSet<Message> Messages => Set<Message>();
+
+    /// <summary>
+    /// News items extracted from messages or newsletters.
+    /// </summary>
     public DbSet<NewsItem> NewsItems => Set<NewsItem>();
+
+    /// <summary>
+    /// Generated summary emails stored for historical reference.
+    /// </summary>
     public DbSet<Summary> Summaries => Set<Summary>();
+
+    /// <summary>
+    /// Recorded pipeline execution attempts and outcomes.
+    /// </summary>
     public DbSet<PipelineRun> PipelineRuns => Set<PipelineRun>();
 
+    /// <summary>
+    /// Configures entity mappings, constraints, indexes, and relationships.
+    /// </summary>
+    /// <param name="modelBuilder">Builder used to define the EF model.</param>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

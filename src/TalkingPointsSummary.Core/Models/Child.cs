@@ -1,10 +1,28 @@
 namespace TalkingPointsSummary.Models;
 
+/// <summary>
+/// Child profile used to group school news in summaries.
+/// </summary>
 public class Child
 {
+    /// <summary>
+    /// Database identifier for the child.
+    /// </summary>
     public int Id { get; set; }
+
+    /// <summary>
+    /// Identifier of the parent that owns the child.
+    /// </summary>
     public int ParentId { get; set; }
+
+    /// <summary>
+    /// Display name for the child.
+    /// </summary>
     public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// School attended by the child.
+    /// </summary>
     public string School { get; set; } = string.Empty;
 
     /// <summary>
@@ -22,6 +40,8 @@ public class Child
     /// </summary>
     public string Emoji { get; set; } = "📚";
 
-    // Navigation
+    /// <summary>
+    /// Parent that owns the child.
+    /// </summary>
     public Parent Parent { get; set; } = null!;
 }

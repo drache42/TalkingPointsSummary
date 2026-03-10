@@ -15,6 +15,11 @@ public class EmailSender : IEmailSender
     private readonly SmtpOptions _smtp;
     private readonly ILogger<EmailSender> _logger;
 
+    /// <summary>
+    /// Initializes an SMTP email sender.
+    /// </summary>
+    /// <param name="smtp">SMTP configuration options.</param>
+    /// <param name="logger">Logger used for delivery diagnostics.</param>
     public EmailSender(IOptions<SmtpOptions> smtp, ILogger<EmailSender> logger)
     {
         _smtp = smtp.Value;
@@ -27,6 +32,7 @@ public class EmailSender : IEmailSender
     /// <param name="recipients">Semicolon-delimited email addresses.</param>
     /// <param name="subject">Email subject line.</param>
     /// <param name="htmlBody">HTML content of the email.</param>
+    /// <param name="ct">Token used to cancel the send operation.</param>
     public async Task SendAsync(string recipients, string subject, string htmlBody, CancellationToken ct = default)
     {
         var message = new MimeMessage();

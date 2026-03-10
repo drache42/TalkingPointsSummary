@@ -24,6 +24,19 @@ public class PipelineOrchestrator
     private readonly ILogger<PipelineOrchestrator> _logger;
     private readonly TimeProvider _timeProvider;
 
+    /// <summary>
+    /// Initializes a pipeline orchestrator for end-to-end parent processing.
+    /// </summary>
+    /// <param name="db">Database context used for persistence.</param>
+    /// <param name="apiClient">TalkingPoints API client.</param>
+    /// <param name="deduplicator">Message deduplication service.</param>
+    /// <param name="categorizer">Message categorization service.</param>
+    /// <param name="scraper">Newsletter scraping service.</param>
+    /// <param name="summaryGenerator">Summary generation service.</param>
+    /// <param name="markdownConverter">Markdown-to-HTML converter.</param>
+    /// <param name="emailSender">Email delivery service.</param>
+    /// <param name="logger">Logger used for pipeline diagnostics.</param>
+    /// <param name="timeProvider">Optional time provider for timestamps.</param>
     public PipelineOrchestrator(
         AppDbContext db,
         ITalkingPointsApiClient apiClient,
@@ -48,6 +61,11 @@ public class PipelineOrchestrator
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
+    /// <summary>
+    /// Runs the full weekly pipeline for a single parent.
+    /// </summary>
+    /// <param name="parent">Parent to process.</param>
+    /// <param name="ct">Token used to cancel the run.</param>
     public async Task RunAsync(Parent parent, CancellationToken ct = default)
     {
         _logger.LogInformation("=== Starting pipeline for parent: {ParentName} (ID: {ParentId}) ===",

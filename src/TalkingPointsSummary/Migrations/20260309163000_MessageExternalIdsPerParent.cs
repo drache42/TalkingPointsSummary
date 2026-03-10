@@ -6,10 +6,17 @@ using TalkingPointsSummary.Data;
 
 namespace TalkingPointsSummary.Migrations
 {
+    /// <summary>
+    /// Updates message indexing so external message identifiers are unique per parent.
+    /// </summary>
     [DbContext(typeof(AppDbContext))]
     [Migration("20260309163000_MessageExternalIdsPerParent")]
     public class MessageExternalIdsPerParent : Migration
     {
+        /// <summary>
+        /// Applies the migration changes.
+        /// </summary>
+        /// <param name="migrationBuilder">Migration builder used to define schema updates.</param>
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropIndex(
@@ -23,6 +30,10 @@ namespace TalkingPointsSummary.Migrations
                 unique: true);
         }
 
+        /// <summary>
+        /// Reverts the migration changes.
+        /// </summary>
+        /// <param name="migrationBuilder">Migration builder used to define schema updates.</param>
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropIndex(

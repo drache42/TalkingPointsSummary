@@ -5,11 +5,19 @@ using TalkingPointsSummary.Configuration;
 
 namespace TalkingPointsSummary.Services;
 
+/// <summary>
+/// Validates newsletter URLs against scheme, host, and resolved-address rules.
+/// </summary>
 public sealed class NewsletterUrlValidator : INewsletterUrlValidator
 {
     private readonly NewsletterScrapingSecurityOptions _options;
     private readonly IHostAddressResolver _hostAddressResolver;
 
+    /// <summary>
+    /// Initializes a newsletter URL validator.
+    /// </summary>
+    /// <param name="options">Security rules that control which URLs are allowed.</param>
+    /// <param name="hostAddressResolver">Resolver used to inspect host DNS results.</param>
     public NewsletterUrlValidator(
         IOptions<NewsletterScrapingSecurityOptions> options,
         IHostAddressResolver hostAddressResolver)
@@ -18,6 +26,11 @@ public sealed class NewsletterUrlValidator : INewsletterUrlValidator
         _hostAddressResolver = hostAddressResolver;
     }
 
+    /// <summary>
+    /// Validates whether a URL may be scraped under the configured security rules.
+    /// </summary>
+    /// <param name="url">URL to validate.</param>
+    /// <param name="cancellationToken">Token used to cancel validation.</param>
     public async Task<NewsletterUrlValidationResult> ValidateAsync(string url, CancellationToken cancellationToken = default)
     {
         if (!_options.Enabled)

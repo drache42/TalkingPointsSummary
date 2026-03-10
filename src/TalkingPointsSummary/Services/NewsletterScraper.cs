@@ -16,6 +16,13 @@ public class NewsletterScraper : INewsletterScraper
     private readonly INewsletterUrlValidator _newsletterUrlValidator;
     private readonly ILogger<NewsletterScraper> _logger;
 
+    /// <summary>
+    /// Initializes a newsletter scraper that proxies requests through Browserless.
+    /// </summary>
+    /// <param name="httpClient">HTTP client used to call Browserless.</param>
+    /// <param name="browserless">Browserless endpoint configuration.</param>
+    /// <param name="newsletterUrlValidator">Validator that approves or rejects newsletter URLs.</param>
+    /// <param name="logger">Logger used for scraping diagnostics.</param>
     public NewsletterScraper(
         HttpClient httpClient,
         IOptions<BrowserlessOptions> browserless,

@@ -40,26 +40,94 @@ public class IntegrationTestFixture : IAsyncLifetime
     private WireMockServer _wireMock = null!;
     private WebApplication _contentServer = null!;
 
-    // Exposed endpoints
+    /// <summary>
+    /// Connection string for the PostgreSQL test container.
+    /// </summary>
     public string PostgresConnectionString { get; private set; } = null!;
+
+    /// <summary>
+    /// Host name for Mailpit SMTP delivery.
+    /// </summary>
     public string MailpitSmtpHost { get; private set; } = null!;
+
+    /// <summary>
+    /// SMTP port exposed by Mailpit.
+    /// </summary>
     public int MailpitSmtpPort { get; private set; }
+
+    /// <summary>
+    /// Base URL for the Mailpit HTTP API.
+    /// </summary>
     public string MailpitApiUrl { get; private set; } = null!;
+
+    /// <summary>
+    /// Base URL for the Browserless test container.
+    /// </summary>
     public string BrowserlessUrl { get; private set; } = null!;
+
+    /// <summary>
+    /// Base URL for the WireMock test server.
+    /// </summary>
     public string WireMockUrl => _wireMock.Url!;
+
+    /// <summary>
+    /// Base URL for the local HTML content server.
+    /// </summary>
     public string ContentServerUrl { get; private set; } = null!;
+
+    /// <summary>
+    /// WireMock server used to stub external HTTP dependencies.
+    /// </summary>
     public WireMockServer WireMock => _wireMock;
 
-    // Seeded data IDs
+    /// <summary>
+    /// Seeded parent identifier available to tests.
+    /// </summary>
     public int SeededParentId { get; private set; }
+
+    /// <summary>
+    /// First seeded child identifier available to tests.
+    /// </summary>
     public int SeededChild1Id { get; private set; }
+
+    /// <summary>
+    /// Second seeded child identifier available to tests.
+    /// </summary>
     public int SeededChild2Id { get; private set; }
 
     // Content server pages — add entries before starting a test
     private readonly Dictionary<string, ContentPage> _contentPages = new();
 
-    public record ContentPage(string Html, int StatusCode = 200);
+    /// <summary>
+    /// Static content served by the integration-test content server.
+    /// </summary>
+    public record ContentPage
+    {
+        /// <summary>
+        /// Initializes a new content-page definition.
+        /// </summary>
+        /// <param name="html">HTML body served for the page.</param>
+        /// <param name="statusCode">HTTP status code returned for the page.</param>
+        public ContentPage(string html, int statusCode = 200)
+        {
+            Html = html;
+            StatusCode = statusCode;
+        }
 
+        /// <summary>
+        /// HTML body served for the page.
+        /// </summary>
+        public string Html { get; init; }
+
+        /// <summary>
+        /// HTTP status code returned for the page.
+        /// </summary>
+        public int StatusCode { get; init; }
+    }
+
+    /// <summary>
+    /// Starts external test dependencies, applies migrations, and seeds base data.
+    /// </summary>
     public async Task InitializeAsync()
     {
         // Start containers in parallel
@@ -106,6 +174,9 @@ public class IntegrationTestFixture : IAsyncLifetime
         await SeedDataAsync();
     }
 
+    /// <summary>
+    /// Stops and disposes external test dependencies.
+    /// </summary>
     public async Task DisposeAsync()
     {
         _wireMock?.Stop();
@@ -527,16 +598,70 @@ public class IntegrationTestFixture : IAsyncLifetime
     }
 }
 
-public record AnthropicStubResponse(string? JsonPayload, bool IsError = false, int StatusCode = 200)
+/// <summary>
+/// Configures a stubbed Anthropic categorization response for integration tests.
+/// </summary>
+public record AnthropicStubResponse
 {
+    /// <summary>
+    /// Initializes a new Anthropic stub response definition.
+    /// </summary>
+    /// <param name="jsonPayload">JSON payload returned by the stub when successful.</param>
+    /// <param name="isError">Whether the stub should return an error response.</param>
+    /// <param name="statusCode">HTTP status code returned by the stub.</param>
+    public AnthropicStubResponse(string? jsonPayload, bool isError = false, int statusCode = 200)
+    {
+        JsonPayload = jsonPayload;
+        IsError = isError;
+        StatusCode = statusCode;
+    }
+
+    /// <summary>
+    /// JSON payload returned by the stub when successful.
+    /// </summary>
+    public string? JsonPayload { get; init; }
+
+    /// <summary>
+    /// Whether the stub should return an error response.
+    /// </summary>
+    public bool IsError { get; init; }
+
+    /// <summary>
+    /// HTTP status code returned by the stub.
+    /// </summary>
+    public int StatusCode { get; init; }
+
+    /// <summary>
+    /// Creates a successful stub response.
+    /// </summary>
+    /// <param name="json">JSON payload returned by the stub.</param>
     public static AnthropicStubResponse Ok(string json) => new(json);
+
+    /// <summary>
+    /// Creates an error stub response.
+    /// </summary>
+    /// <param name="statusCode">HTTP status code returned by the stub.</param>
     public static AnthropicStubResponse Error(int statusCode = 500) => new(null, true, statusCode);
 }
 
+/// <summary>
+/// Simplified Mailpit message payload used by integration assertions.
+/// </summary>
 public class MailpitMessage
 {
+    /// <summary>
+    /// Mailpit message identifier.
+    /// </summary>
     public string Id { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Message subject line.
+    /// </summary>
     public string Subject { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Recipient addresses on the message.
+    /// </summary>
     public List<string> To { get; set; } = [];
 }
 

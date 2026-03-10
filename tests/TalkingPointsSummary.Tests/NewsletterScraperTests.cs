@@ -10,6 +10,9 @@ using TalkingPointsSummary.Services;
 
 namespace TalkingPointsSummary.Tests;
 
+/// <summary>
+/// Verifies newsletter scraping behavior and fallback paths.
+/// </summary>
 public class NewsletterScraperTests
 {
     private static NewsletterScraper CreateScraper(
@@ -42,6 +45,9 @@ public class NewsletterScraperTests
         return mockHandler;
     }
 
+    /// <summary>
+    /// Verifies that a valid Browserless response yields extracted newsletter text.
+    /// </summary>
     [Fact]
     public async Task ScrapeAsync_ValidResponse_ExtractsTextFromNestedJsonPath()
     {
@@ -67,6 +73,9 @@ public class NewsletterScraperTests
         result.Should().Be("Scraped newsletter content here");
     }
 
+    /// <summary>
+    /// Verifies that scraper HTTP failures return <see langword="null"/>.
+    /// </summary>
     [Fact]
     public async Task ScrapeAsync_HttpCallThrows_ReturnsNull()
     {
@@ -84,6 +93,9 @@ public class NewsletterScraperTests
         result.Should().BeNull();
     }
 
+    /// <summary>
+    /// Verifies that unexpected Browserless JSON returns <see langword="null"/>.
+    /// </summary>
     [Fact]
     public async Task ScrapeAsync_UnexpectedJsonStructure_ReturnsNull()
     {
@@ -98,6 +110,9 @@ public class NewsletterScraperTests
         result.Should().BeNull();
     }
 
+    /// <summary>
+    /// Verifies that loopback URLs are blocked before Browserless is called.
+    /// </summary>
     [Fact]
     public async Task ScrapeAsync_LoopbackUrl_ReturnsNullWithoutCallingBrowserless()
     {
@@ -114,6 +129,9 @@ public class NewsletterScraperTests
             ItExpr.IsAny<CancellationToken>());
     }
 
+    /// <summary>
+    /// Verifies that explicitly allowed HTTP hosts are still scraped.
+    /// </summary>
     [Fact]
     public async Task ScrapeAsync_AllowedHostOverHttp_CallsBrowserless()
     {

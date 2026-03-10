@@ -8,21 +8,38 @@ using TalkingPointsSummary.Services;
 
 namespace TalkingPointsSummary.IntegrationTests;
 
+/// <summary>
+/// Integration tests for scheduled and concurrent weekly pipeline execution.
+/// </summary>
 [Collection("Integration")]
 [Trait("Category", "Integration")]
 public class WeeklyPipelineServiceIntegrationTests : IAsyncLifetime
 {
     private readonly IntegrationTestFixture _fixture;
 
+    /// <summary>
+    /// Initializes a new weekly-pipeline integration test suite.
+    /// </summary>
+    /// <param name="fixture">Shared integration-test fixture.</param>
     public WeeklyPipelineServiceIntegrationTests(IntegrationTestFixture fixture)
     {
         _fixture = fixture;
     }
 
+    /// <summary>
+    /// Resets shared test state before each test.
+    /// </summary>
     public async Task InitializeAsync() => await _fixture.ResetAsync();
+
+    /// <summary>
+    /// Completes per-test cleanup.
+    /// </summary>
     public Task DisposeAsync() => Task.CompletedTask;
 
     [Fact]
+    /// <summary>
+    /// Verifies that a concurrent second run is rejected while the first run is active.
+    /// </summary>
     public async Task TryRunFullPipeline_ConcurrentCalls_SecondReturnsAlreadyRunning()
     {
         // Arrange: stub with delay so first run takes a while
@@ -65,6 +82,9 @@ public class WeeklyPipelineServiceIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    /// <summary>
+    /// Verifies that an inactive or missing parent identifier returns `ParentNotFound`.
+    /// </summary>
     public async Task TryRunFullPipeline_InactiveParentId_ReturnsParentNotFound()
     {
         await using var sp = _fixture.CreateServiceProvider();
@@ -76,6 +96,9 @@ public class WeeklyPipelineServiceIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    /// <summary>
+    /// Verifies that the public in-progress flag reflects the run lifecycle.
+    /// </summary>
     public async Task IsRunInProgress_ReflectsRunState()
     {
         // Arrange
@@ -118,6 +141,9 @@ public class WeeklyPipelineServiceIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    /// <summary>
+    /// Verifies that the scheduled run is skipped after restart when the same date was already recorded.
+    /// </summary>
     public async Task TryRunScheduledPipeline_AfterServiceRestart_SkipsSecondRunForSameDate()
     {
         const string summaryMarkdown = "# Summary\n\nTest";

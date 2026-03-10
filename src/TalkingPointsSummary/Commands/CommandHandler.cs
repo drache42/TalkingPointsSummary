@@ -11,6 +11,10 @@ namespace TalkingPointsSummary.Commands;
 /// </summary>
 public static class CommandHandler
 {
+    /// <summary>
+    /// Builds the root CLI command with all parent, child, and pipeline subcommands.
+    /// </summary>
+    /// <param name="services">Service provider used by command handlers.</param>
     public static RootCommand BuildRootCommand(IServiceProvider services)
     {
         var rootCommand = new RootCommand("Talking Points Summary - Weekly school message digest");

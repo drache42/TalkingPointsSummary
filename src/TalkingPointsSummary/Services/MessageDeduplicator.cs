@@ -14,6 +14,12 @@ public class MessageDeduplicator : IMessageDeduplicator
     private readonly ILogger<MessageDeduplicator> _logger;
     private readonly TimeProvider _timeProvider;
 
+    /// <summary>
+    /// Initializes a deduplicator for storing new TalkingPoints messages.
+    /// </summary>
+    /// <param name="db">Database context used for persistence.</param>
+    /// <param name="logger">Logger used for deduplication diagnostics.</param>
+    /// <param name="timeProvider">Optional time provider used for local timestamps.</param>
     public MessageDeduplicator(AppDbContext db, ILogger<MessageDeduplicator> logger, TimeProvider? timeProvider = null)
     {
         _db = db;

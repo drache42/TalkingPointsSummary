@@ -11,18 +11,50 @@ using TalkingPointsSummary.Services;
 
 namespace TalkingPointsSummary.Pipeline;
 
+/// <summary>
+/// Outcome returned when a pipeline run request finishes or is rejected.
+/// </summary>
 public enum PipelineRunStatus
 {
+    /// <summary>
+    /// The pipeline run completed.
+    /// </summary>
     Completed,
+
+    /// <summary>
+    /// The run was rejected because another run is already active.
+    /// </summary>
     AlreadyRunning,
+
+    /// <summary>
+    /// The scheduled run was skipped because it was already recorded for the date.
+    /// </summary>
     AlreadyScheduled,
+
+    /// <summary>
+    /// The requested parent was not found or is inactive.
+    /// </summary>
     ParentNotFound
 }
 
+/// <summary>
+/// Outcome returned when starting a background pipeline run.
+/// </summary>
 public enum PipelineStartStatus
 {
+    /// <summary>
+    /// The background run was started.
+    /// </summary>
     Started,
+
+    /// <summary>
+    /// The run was rejected because another run is already active.
+    /// </summary>
     AlreadyRunning,
+
+    /// <summary>
+    /// The requested parent was not found or is inactive.
+    /// </summary>
     ParentNotFound
 }
 
@@ -40,6 +72,13 @@ public class WeeklyPipelineService : BackgroundService
     private int _isRunInProgress;
     private const string ScheduleTrigger = "schedule";
 
+    /// <summary>
+    /// Initializes the scheduled weekly pipeline background service.
+    /// </summary>
+    /// <param name="scopeFactory">Scope factory used to resolve per-run services.</param>
+    /// <param name="schedule">Configured weekly schedule.</param>
+    /// <param name="logger">Logger used for scheduler diagnostics.</param>
+    /// <param name="timeProvider">Optional time provider used for scheduling decisions.</param>
     public WeeklyPipelineService(
         IServiceScopeFactory scopeFactory,
         IOptions<PipelineScheduleOptions> schedule,
@@ -52,6 +91,10 @@ public class WeeklyPipelineService : BackgroundService
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
+    /// <summary>
+    /// Executes the background scheduling loop.
+    /// </summary>
+    /// <param name="stoppingToken">Token that stops the service loop.</param>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation(
@@ -146,11 +189,25 @@ public class WeeklyPipelineService : BackgroundService
             throw new InvalidOperationException("The requested parent was not found or is inactive.");
     }
 
+    /// <summary>
+    /// Returns whether a pipeline run is currently active.
+    /// </summary>
     public bool IsRunInProgress => Volatile.Read(ref _isRunInProgress) == 1;
 
+    /// <summary>
+    /// Attempts to run the full pipeline for all active parents.
+    /// </summary>
+    /// <param name="trigger">Trigger name recorded for the run.</param>
+    /// <param name="ct">Token used to cancel the run.</param>
     public async Task<PipelineRunStatus> TryRunFullPipelineAsync(string trigger, CancellationToken ct = default)
         => await TryRunPipelineAsync(trigger, parentId: null, scheduledDate: null, ct);
 
+    /// <summary>
+    /// Attempts to run the full pipeline, optionally scoped to a single parent.
+    /// </summary>
+    /// <param name="trigger">Trigger name recorded for the run.</param>
+    /// <param name="parentId">Optional parent identifier to scope the run.</param>
+    /// <param name="ct">Token used to cancel the run.</param>
     public async Task<PipelineRunStatus> TryRunFullPipelineAsync(string trigger, int? parentId, CancellationToken ct = default)
         => await TryRunPipelineAsync(trigger, parentId, scheduledDate: null, ct);
 
@@ -209,6 +266,12 @@ public class WeeklyPipelineService : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Attempts to start a background pipeline run and returns immediately.
+    /// </summary>
+    /// <param name="trigger">Trigger name recorded for the run.</param>
+    /// <param name="parentId">Optional parent identifier to scope the run.</param>
+    /// <param name="ct">Token used to cancel the start request.</param>
     public async Task<PipelineStartStatus> TryStartPipelineAsync(string trigger, int? parentId, CancellationToken ct = default)
     {
         if (!await _runLock.WaitAsync(TimeSpan.Zero, ct))
