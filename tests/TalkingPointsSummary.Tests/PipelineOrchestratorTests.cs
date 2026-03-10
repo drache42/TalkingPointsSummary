@@ -61,7 +61,7 @@ public class PipelineOrchestratorTests : IDisposable
         _mockEmailSender = new Mock<IEmailSender>();
 
         // Default setup: API returns empty, dedup returns empty
-        _mockApiClient.Setup(x => x.FetchMessagesAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+        _mockApiClient.Setup(x => x.FetchMessagesAsync(It.IsAny<Parent>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
         _mockDeduplicator.Setup(x => x.DeduplicateAndSaveAsync(It.IsAny<Parent>(), It.IsAny<List<TalkingPointsMessage>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
@@ -90,6 +90,43 @@ public class PipelineOrchestratorTests : IDisposable
 
         _mockEmailSender.Verify(x => x.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         _db.Summaries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RunAsync_PassesNewestSavedMessageIdToApiClient()
+    {
+        _db.Messages.AddRange(
+            new Message
+            {
+                ParentId = _testParent.Id,
+                ExternalMessageId = "older-msg",
+                FromName = "Teacher",
+                MessageText = "Older",
+                SentAt = new DateTime(2026, 3, 1, 8, 0, 0, DateTimeKind.Utc),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new Message
+            {
+                ParentId = _testParent.Id,
+                ExternalMessageId = "latest-msg",
+                FromName = "Teacher",
+                MessageText = "Latest",
+                SentAt = new DateTime(2026, 3, 2, 8, 0, 0, DateTimeKind.Utc),
+                CreatedAt = DateTime.UtcNow,
+            });
+        await _db.SaveChangesAsync();
+
+        _mockSummaryGenerator.Setup(x => x.GenerateAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
+
+        await _orchestrator.RunAsync(_testParent);
+
+        _mockApiClient.Verify(
+            x => x.FetchMessagesAsync(
+                It.Is<Parent>(parent => parent.Id == _testParent.Id),
+                "latest-msg",
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]

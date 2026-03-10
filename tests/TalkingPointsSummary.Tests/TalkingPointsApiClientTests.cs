@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -133,4 +134,115 @@ public class TalkingPointsApiClientTests
 
         await act.Should().ThrowAsync<HttpRequestException>();
     }
+
+    [Fact]
+    public async Task FetchMessagesAsync_WhenFirstPageFull_FetchesAdditionalPages()
+    {
+        var pageOneMessages = Enumerable.Range(1, 20)
+            .Select(index => CreateApiMessage($"page1-{index}"))
+            .ToList();
+        var pageTwoMessages = new List<TalkingPointsMessage>
+        {
+            CreateApiMessage("page2-1"),
+            CreateApiMessage("page2-2")
+        };
+
+        var requestedPages = new List<int>();
+        var mockHandler = new Mock<HttpMessageHandler>();
+        mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((request, _) =>
+            {
+                var page = System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query)["page"];
+                requestedPages.Add(int.Parse(page!));
+            })
+            .ReturnsAsync((HttpRequestMessage request, CancellationToken _) =>
+            {
+                var page = int.Parse(System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query)["page"]!);
+                var body = page switch
+                {
+                    1 => CreateApiResponse(pageOneMessages),
+                    2 => CreateApiResponse(pageTwoMessages),
+                    _ => CreateApiResponse([])
+                };
+
+                return new HttpResponseMessage
+                {
+                    StatusCode = HttpStatusCode.OK,
+                    Content = new StringContent(body, Encoding.UTF8, "application/json")
+                };
+            });
+
+        var client = CreateClient(mockHandler.Object);
+
+        var result = await client.FetchMessagesAsync(_testParent);
+
+        result.Should().HaveCount(22);
+        requestedPages.Should().Equal(1, 2);
+    }
+
+    [Fact]
+    public async Task FetchMessagesAsync_StopsWhenStopMessageIsEncountered()
+    {
+        var pageOneMessages = Enumerable.Range(1, 20)
+            .Select(index => CreateApiMessage($"page1-{index}"))
+            .ToList();
+        var pageTwoMessages = new List<TalkingPointsMessage>
+        {
+            CreateApiMessage("page2-1"),
+            CreateApiMessage("page2-2"),
+            CreateApiMessage("already-saved"),
+            CreateApiMessage("older-than-saved")
+        };
+
+        var requestedPages = new List<int>();
+        var mockHandler = new Mock<HttpMessageHandler>();
+        mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((request, _) =>
+            {
+                requestedPages.Add(int.Parse(System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query)["page"]!));
+            })
+            .ReturnsAsync((HttpRequestMessage request, CancellationToken _) =>
+            {
+                var page = int.Parse(System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query)["page"]!);
+                var body = page switch
+                {
+                    1 => CreateApiResponse(pageOneMessages),
+                    2 => CreateApiResponse(pageTwoMessages),
+                    _ => CreateApiResponse([])
+                };
+
+                return new HttpResponseMessage
+                {
+                    StatusCode = HttpStatusCode.OK,
+                    Content = new StringContent(body, Encoding.UTF8, "application/json")
+                };
+            });
+
+        var client = CreateClient(mockHandler.Object);
+
+        var result = await client.FetchMessagesAsync(_testParent, "already-saved");
+
+        result.Select(message => message.Id).Should().ContainInOrder(
+            pageOneMessages.Select(message => message.Id)
+                .Concat(["page2-1", "page2-2"]));
+        result.Should().NotContain(message => message.Id == "already-saved" || message.Id == "older-than-saved");
+        requestedPages.Should().Equal(1, 2);
+    }
+
+    private static string CreateApiResponse(List<TalkingPointsMessage> messages)
+        => JsonSerializer.Serialize(new TalkingPointsApiResponse
+        {
+            Data = new TalkingPointsData { Messages = messages }
+        });
+
+    private static TalkingPointsMessage CreateApiMessage(string id)
+        => new()
+        {
+            Id = id,
+            Text = $"Message {id}",
+            CreatedAt = DateTime.UtcNow,
+            DisplayDate = DateTime.UtcNow
+        };
 }

@@ -14,6 +14,7 @@ public class TalkingPointsApiClient : ITalkingPointsApiClient
     private readonly HttpClient _httpClient;
     private readonly ILogger<TalkingPointsApiClient> _logger;
     private const string BaseUrl = "https://app.talkingpts.org/api/parents/v3/messages/feed";
+    private const int PageSize = 20;
 
     public TalkingPointsApiClient(HttpClient httpClient, ILogger<TalkingPointsApiClient> logger)
     {
@@ -21,9 +22,55 @@ public class TalkingPointsApiClient : ITalkingPointsApiClient
         _logger = logger;
     }
 
-    public async Task<List<TalkingPointsMessage>> FetchMessagesAsync(Parent parent, CancellationToken ct = default)
+    public async Task<List<TalkingPointsMessage>> FetchMessagesAsync(Parent parent, string? stopAtMessageId = null, CancellationToken ct = default)
     {
-        var url = $"{BaseUrl}?page=1&pageSize=20&students=";
+        _logger.LogInformation("Fetching messages for parent {ParentName} (ID: {ParentId})", parent.Name, parent.Id);
+
+        var messages = new List<TalkingPointsMessage>();
+        var page = 1;
+        var stopReached = false;
+
+        while (!stopReached)
+        {
+            var pageMessages = await FetchPageAsync(parent, page, ct);
+            if (pageMessages.Count == 0)
+            {
+                break;
+            }
+
+            foreach (var message in pageMessages)
+            {
+                if (!string.IsNullOrWhiteSpace(stopAtMessageId)
+                    && string.Equals(message.Id, stopAtMessageId, StringComparison.Ordinal))
+                {
+                    stopReached = true;
+                    break;
+                }
+
+                messages.Add(message);
+            }
+
+            if (stopReached || pageMessages.Count < PageSize)
+            {
+                break;
+            }
+
+            page++;
+        }
+
+        _logger.LogInformation(
+            "Fetched {Count} new candidate messages for parent {ParentName} across {PageCount} page(s). StopAtReached={StopReached}",
+            messages.Count,
+            parent.Name,
+            page,
+            stopReached);
+
+        return messages;
+    }
+
+    private async Task<List<TalkingPointsMessage>> FetchPageAsync(Parent parent, int page, CancellationToken ct)
+    {
+        var url = $"{BaseUrl}?page={page}&pageSize={PageSize}&students=";
 
         var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Add("x-token", parent.TalkingPointsToken);
@@ -32,18 +79,13 @@ public class TalkingPointsApiClient : ITalkingPointsApiClient
         request.Headers.Add("x-language", "en");
         request.Headers.Add("x-mobile-platform", "web");
 
-        _logger.LogInformation("Fetching messages for parent {ParentName} (ID: {ParentId})", parent.Name, parent.Id);
-
         var response = await _httpClient.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
 
         var apiResponse = await response.Content.ReadFromJsonAsync<TalkingPointsApiResponse>(
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true }, ct);
 
-        var messages = apiResponse?.Data?.Messages ?? [];
-        _logger.LogInformation("Fetched {Count} messages for parent {ParentName}", messages.Count, parent.Name);
-
-        return messages;
+        return apiResponse?.Data?.Messages ?? [];
     }
 }
 

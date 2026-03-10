@@ -4,5 +4,5 @@ namespace TalkingPointsSummary.Services;
 
 public interface ITalkingPointsApiClient
 {
-    Task<List<TalkingPointsMessage>> FetchMessagesAsync(Parent parent, CancellationToken ct = default);
+    Task<List<TalkingPointsMessage>> FetchMessagesAsync(Parent parent, string? stopAtMessageId = null, CancellationToken ct = default);
 }

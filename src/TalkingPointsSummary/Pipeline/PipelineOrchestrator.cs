@@ -52,8 +52,15 @@ public class PipelineOrchestrator
 
         try
         {
+            var lastSavedMessageId = await _db.Messages
+                .Where(message => message.ParentId == parent.Id)
+                .OrderByDescending(message => message.SentAt)
+                .ThenByDescending(message => message.Id)
+                .Select(message => message.ExternalMessageId)
+                .FirstOrDefaultAsync(ct);
+
             // Step 1: Fetch messages from TalkingPoints API
-            var apiMessages = await _apiClient.FetchMessagesAsync(parent, ct);
+            var apiMessages = await _apiClient.FetchMessagesAsync(parent, lastSavedMessageId, ct);
 
             // Step 2: Deduplicate and save new messages
             await _deduplicator.DeduplicateAndSaveAsync(parent, apiMessages, ct);

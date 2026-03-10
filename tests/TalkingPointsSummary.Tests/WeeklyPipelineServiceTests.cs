@@ -49,7 +49,7 @@ public class WeeklyPipelineServiceTests : IDisposable
             Hour = _settings.Hour,
         }));
         var mockApiClient = new Mock<ITalkingPointsApiClient>();
-        mockApiClient.Setup(x => x.FetchMessagesAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+        mockApiClient.Setup(x => x.FetchMessagesAsync(It.IsAny<Parent>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
         services.AddSingleton(mockApiClient.Object);
         services.AddSingleton(Mock.Of<IMessageDeduplicator>());
@@ -96,7 +96,7 @@ public class WeeklyPipelineServiceTests : IDisposable
     {
         var tcs = new TaskCompletionSource();
         var slowApiClient = new Mock<ITalkingPointsApiClient>();
-        slowApiClient.Setup(x => x.FetchMessagesAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+        slowApiClient.Setup(x => x.FetchMessagesAsync(It.IsAny<Parent>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Returns(async () =>
             {
                 await tcs.Task;
@@ -167,7 +167,7 @@ public class WeeklyPipelineServiceTests : IDisposable
     {
         var tcs = new TaskCompletionSource();
         var slowApiClient = new Mock<ITalkingPointsApiClient>();
-        slowApiClient.Setup(x => x.FetchMessagesAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+        slowApiClient.Setup(x => x.FetchMessagesAsync(It.IsAny<Parent>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Returns(async () =>
             {
                 await tcs.Task;
@@ -219,7 +219,7 @@ public class WeeklyPipelineServiceTests : IDisposable
     {
         var tcs = new TaskCompletionSource();
         var slowApiClient = new Mock<ITalkingPointsApiClient>();
-        slowApiClient.Setup(x => x.FetchMessagesAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+        slowApiClient.Setup(x => x.FetchMessagesAsync(It.IsAny<Parent>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Returns(async () =>
             {
                 await tcs.Task;
