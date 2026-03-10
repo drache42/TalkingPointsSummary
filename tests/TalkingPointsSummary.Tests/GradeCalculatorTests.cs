@@ -6,6 +6,8 @@ namespace TalkingPointsSummary.Tests;
 
 public class GradeCalculatorTests
 {
+    private readonly IGradeCalculator _gradeCalculator = new GradeCalculator();
+
     [Theory]
     [InlineData(0, 2025, "2026-03-01", 0)]   // Kindergarten in March 2026 (still 2025-2026 school year)
     [InlineData(3, 2025, "2026-03-01", 3)]   // 3rd grade in March 2026
@@ -18,7 +20,7 @@ public class GradeCalculatorTests
     public void GetCurrentGrade_ReturnsCorrectGrade(int startingGrade, int startingYear, string dateStr, int expectedGrade)
     {
         var date = DateTime.Parse(dateStr);
-        var result = GradeCalculator.GetCurrentGrade(startingGrade, startingYear, date);
+        var result = _gradeCalculator.GetCurrentGrade(startingGrade, startingYear, date);
         result.Should().Be(expectedGrade);
     }
 
@@ -32,7 +34,7 @@ public class GradeCalculatorTests
     [InlineData(12, "12th Grade")]
     public void GetGradeLabel_ReturnsCorrectLabel(int grade, string expectedLabel)
     {
-        GradeCalculator.GetGradeLabel(grade).Should().Be(expectedLabel);
+        _gradeCalculator.GetGradeLabel(grade).Should().Be(expectedLabel);
     }
 
     [Fact]
@@ -46,7 +48,7 @@ public class GradeCalculatorTests
             StartingYear = 2025
         };
 
-        var result = GradeCalculator.GetCurrentGradeLabel(clara, new DateTime(2026, 3, 1));
+        var result = _gradeCalculator.GetCurrentGradeLabel(clara, new DateTime(2026, 3, 1));
         result.Should().Be("Kindergarten");
     }
 
@@ -61,7 +63,7 @@ public class GradeCalculatorTests
             StartingYear = 2025
         };
 
-        var result = GradeCalculator.GetCurrentGradeLabel(nolan, new DateTime(2026, 3, 1));
+        var result = _gradeCalculator.GetCurrentGradeLabel(nolan, new DateTime(2026, 3, 1));
         result.Should().Be("3rd Grade");
     }
 
@@ -76,7 +78,7 @@ public class GradeCalculatorTests
             StartingYear = 2025
         };
 
-        var result = GradeCalculator.GetCurrentGradeLabel(clara, new DateTime(2026, 10, 1));
+        var result = _gradeCalculator.GetCurrentGradeLabel(clara, new DateTime(2026, 10, 1));
         result.Should().Be("1st Grade");
     }
 
@@ -91,7 +93,7 @@ public class GradeCalculatorTests
             StartingYear = 2025
         };
 
-        var result = GradeCalculator.GetCurrentGradeLabel(nolan, new DateTime(2026, 10, 1));
+        var result = _gradeCalculator.GetCurrentGradeLabel(nolan, new DateTime(2026, 10, 1));
         result.Should().Be("4th Grade");
     }
 }

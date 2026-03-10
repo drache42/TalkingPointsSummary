@@ -28,9 +28,9 @@ public interface IChildService
     Task<List<Child>> ListChildrenAsync(int parentId, CancellationToken cancellationToken = default);
 }
 
-public sealed class ChildService(AppDbContext dbContext, TimeProvider? timeProvider = null) : IChildService
+public sealed class ChildService(AppDbContext dbContext, IGradeCalculator? gradeCalculator = null) : IChildService
 {
-    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+    private readonly IGradeCalculator _gradeCalculator = gradeCalculator ?? new GradeCalculator();
 
     public async Task<Child> CreateChildAsync(int parentId, CreateChildRequest request, CancellationToken cancellationToken = default)
     {
@@ -136,7 +136,7 @@ public sealed class ChildService(AppDbContext dbContext, TimeProvider? timeProvi
 
     private int ResolveStartingYear(int? requestedStartingYear)
     {
-        var currentSchoolYear = GradeCalculator.GetCurrentSchoolYear(_timeProvider.GetUtcDateTime());
+        var currentSchoolYear = _gradeCalculator.GetCurrentSchoolYear();
         var resolvedYear = requestedStartingYear ?? currentSchoolYear;
 
         if (resolvedYear < 2000 || resolvedYear > currentSchoolYear)

@@ -10,6 +10,7 @@ namespace TalkingPointsSummary.Tests;
 public class ParentChildServiceTests
 {
     private static readonly DateTimeOffset FixedUtcNow = new(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
+    private static readonly IGradeCalculator FixedGradeCalculator = new GradeCalculator(new FixedTimeProvider(FixedUtcNow));
 
     [Fact]
     public async Task CreateParentAsync_NormalizesAndPersistsParent()
@@ -61,13 +62,13 @@ public class ParentChildServiceTests
         db.Parents.Add(parent);
         await db.SaveChangesAsync();
 
-        var service = new ChildService(db, new FixedTimeProvider(FixedUtcNow));
+        var service = new ChildService(db, FixedGradeCalculator);
 
         var child = await service.CreateChildAsync(
             parent.Id,
             new CreateChildRequest("Clara", "Elementary", 0, null, null));
 
-        child.StartingYear.Should().Be(GradeCalculator.GetCurrentSchoolYear(FixedUtcNow.UtcDateTime));
+        child.StartingYear.Should().Be(FixedGradeCalculator.GetCurrentSchoolYear(FixedUtcNow.UtcDateTime));
         child.Emoji.Should().Be("📚");
     }
 
@@ -75,7 +76,7 @@ public class ParentChildServiceTests
     public async Task CreateChildAsync_MissingParent_ThrowsNotFound()
     {
         await using var db = CreateDbContext();
-        var service = new ChildService(db, new FixedTimeProvider(FixedUtcNow));
+        var service = new ChildService(db, FixedGradeCalculator);
 
         var act = () => service.CreateChildAsync(
             999,
@@ -99,7 +100,7 @@ public class ParentChildServiceTests
         db.Parents.Add(parent);
         await db.SaveChangesAsync();
 
-        var service = new ChildService(db, new FixedTimeProvider(FixedUtcNow));
+        var service = new ChildService(db, FixedGradeCalculator);
 
         var act = () => service.CreateChildAsync(
             parent.Id,
@@ -133,7 +134,7 @@ public class ParentChildServiceTests
         db.Add(child);
         await db.SaveChangesAsync();
 
-        var service = new ChildService(db, new FixedTimeProvider(FixedUtcNow));
+        var service = new ChildService(db, FixedGradeCalculator);
 
         var updatedChild = await service.UpdateChildAsync(
             parent.Id,

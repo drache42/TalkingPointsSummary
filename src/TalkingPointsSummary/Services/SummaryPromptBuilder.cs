@@ -16,17 +16,29 @@ public sealed class SummaryPromptBuilder
     private static readonly Lazy<string> DefaultTemplate = new(LoadDefaultTemplate);
 
     private readonly string _template;
+    private readonly IGradeCalculator _gradeCalculator;
 
     public SummaryPromptBuilder()
-        : this(DefaultTemplate.Value)
+        : this(DefaultTemplate.Value, new GradeCalculator())
+    {
+    }
+
+    public SummaryPromptBuilder(IGradeCalculator gradeCalculator)
+        : this(DefaultTemplate.Value, gradeCalculator)
     {
     }
 
     public SummaryPromptBuilder(string template)
+        : this(template, new GradeCalculator())
+    {
+    }
+
+    public SummaryPromptBuilder(string template, IGradeCalculator gradeCalculator)
     {
         _template = string.IsNullOrWhiteSpace(template)
             ? throw new ArgumentException("Prompt template cannot be empty.", nameof(template))
             : template;
+        _gradeCalculator = gradeCalculator;
     }
 
     public string Build(
@@ -46,12 +58,12 @@ public sealed class SummaryPromptBuilder
         return prompt;
     }
 
-    private static string BuildContext(IEnumerable<Child> children, DateTime now)
+    private string BuildContext(IEnumerable<Child> children, DateTime now)
     {
         var builder = new StringBuilder();
         foreach (var child in children)
         {
-            var gradeLabel = GradeCalculator.GetCurrentGradeLabel(child, now);
+            var gradeLabel = _gradeCalculator.GetCurrentGradeLabel(child, now);
             builder.AppendLine($"- {child.Name} ({child.School}) — {gradeLabel}");
         }
 
@@ -93,13 +105,13 @@ public sealed class SummaryPromptBuilder
         return builder.ToString().TrimEnd();
     }
 
-    private static string BuildChildSections(IEnumerable<Child> children, DateTime now)
+    private string BuildChildSections(IEnumerable<Child> children, DateTime now)
     {
         var builder = new StringBuilder();
 
         foreach (var child in children)
         {
-            var gradeLabel = GradeCalculator.GetCurrentGradeLabel(child, now);
+            var gradeLabel = _gradeCalculator.GetCurrentGradeLabel(child, now);
             builder.AppendLine($"# {child.Emoji} {child.Name} ({gradeLabel} at {child.School})");
             builder.AppendLine("### [Subheading Topic]");
             builder.AppendLine("[Detailed but scannable summary. Preserve classroom learning, reminders, celebrations, and next steps when present.]\n");

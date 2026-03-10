@@ -117,7 +117,7 @@ public static class CommandHandler
         {
             using var scope = services.CreateScope();
             var parentService = scope.ServiceProvider.GetRequiredService<IParentService>();
-            var timeProvider = scope.ServiceProvider.GetRequiredService<TimeProvider>();
+            var gradeCalculator = scope.ServiceProvider.GetRequiredService<IGradeCalculator>();
             var parents = await parentService.ListParentsAsync();
 
             if (parents.Count == 0)
@@ -141,7 +141,7 @@ public static class CommandHandler
                 {
                     foreach (var child in parent.Children)
                     {
-                        var gradeLabel = Services.GradeCalculator.GetCurrentGradeLabel(child, timeProvider.GetUtcDateTime());
+                        var gradeLabel = gradeCalculator.GetCurrentGradeLabel(child);
                         Console.WriteLine($"    {child.Emoji} [{child.Id}] {child.Name} — {child.School} — {gradeLabel}");
                     }
                 }

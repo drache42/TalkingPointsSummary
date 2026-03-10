@@ -1,10 +1,10 @@
 @page "/parents/{ParentId:int}/children/create"
 @page "/parents/{ParentId:int}/children/{Id:int}/edit"
 @rendermode InteractiveServer
+@inject IGradeCalculator GradeCalculator
 @inject IParentService ParentService
 @inject IChildService ChildService
 @inject NavigationManager Nav
-@inject TimeProvider TimeProvider
 
 <PageTitle>@(Id.HasValue ? "Edit Child" : "Add Child") — TalkingPoints Admin</PageTitle>
 
@@ -95,7 +95,7 @@ else
             {
                 Name = child.Name,
                 School = child.School,
-                Grade = GradeCalculator.GetCurrentGrade(child, TimeProvider.GetUtcDateTime()),
+                Grade = GradeCalculator.GetCurrentGrade(child),
                 Emoji = child.Emoji,
             };
         }

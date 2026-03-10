@@ -15,19 +15,19 @@ namespace TalkingPointsSummary.Services;
 /// </summary>
 public class SummaryGenerator : ISummaryGenerator
 {
-    private static readonly SummaryPromptBuilder PromptBuilder = new();
-
     private readonly HttpClient _httpClient;
     private readonly AppDbContext _db;
     private readonly AnthropicOptions _anthropic;
     private readonly ILogger<SummaryGenerator> _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly SummaryPromptBuilder _promptBuilder;
 
     public SummaryGenerator(
         HttpClient httpClient,
         AppDbContext db,
         IOptions<AnthropicOptions> anthropic,
         ILogger<SummaryGenerator> logger,
+        IGradeCalculator gradeCalculator,
         TimeProvider? timeProvider = null)
     {
         _httpClient = httpClient;
@@ -35,6 +35,7 @@ public class SummaryGenerator : ISummaryGenerator
         _anthropic = anthropic.Value;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _promptBuilder = new SummaryPromptBuilder(gradeCalculator);
     }
 
     /// <summary>
@@ -65,7 +66,7 @@ public class SummaryGenerator : ISummaryGenerator
             .Where(c => c.ParentId == parent.Id)
             .ToListAsync(ct);
 
-        var prompt = PromptBuilder.Build(now, children, newsItems, previousSummaries);
+        var prompt = _promptBuilder.Build(now, children, newsItems, previousSummaries);
 
         _logger.LogInformation("Generating summary for parent {ParentName} with {NewsCount} news items",
             parent.Name, newsItems.Count);

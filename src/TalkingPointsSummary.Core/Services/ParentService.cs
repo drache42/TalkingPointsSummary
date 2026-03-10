@@ -139,6 +139,7 @@ public static class ParentChildServiceCollectionExtensions
 {
     public static IServiceCollection AddParentChildServices(this IServiceCollection services)
     {
+        services.AddSingleton<IGradeCalculator, GradeCalculator>();
         services.AddScoped<IParentService, ParentService>();
         services.AddScoped<IChildService, ChildService>();
         return services;

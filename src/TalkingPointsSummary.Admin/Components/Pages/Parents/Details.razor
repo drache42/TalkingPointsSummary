@@ -1,7 +1,7 @@
 @page "/parents/{Id:int}"
 @rendermode InteractiveServer
+@inject IGradeCalculator GradeCalculator
 @inject IParentService ParentService
-@inject TimeProvider TimeProvider
 
 <PageTitle>@(_parent?.Name ?? "Parent") — TalkingPoints Admin</PageTitle>
 
@@ -80,7 +80,7 @@ else
                         <td>@child.Emoji</td>
                         <td>@child.Name</td>
                         <td>@child.School</td>
-                        <td>@GradeCalculator.GetCurrentGradeLabel(child, TimeProvider.GetUtcDateTime())</td>
+                        <td>@GradeCalculator.GetCurrentGradeLabel(child)</td>
                         <td class="text-end">
                             <a href="/parents/@_parent.Id/children/@child.Id/edit" class="btn btn-sm btn-outline-primary">Edit</a>
                             <a href="/parents/@_parent.Id/children/@child.Id/delete" class="btn btn-sm btn-outline-danger">Delete</a>
