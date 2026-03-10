@@ -1,8 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Http.Resilience;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Polly;
 using Serilog;
 using TalkingPointsSummary.Data;
 using TalkingPointsSummary.Pipeline;
@@ -13,6 +15,13 @@ namespace TalkingPointsSummary.Configuration;
 internal static class WorkerConfiguration
 {
     private const string TalkingPointsConnectionName = "TalkingPoints";
+    private static readonly HttpRetryStrategyOptions SharedRetryOptions = new()
+    {
+        BackoffType = DelayBackoffType.Exponential,
+        MaxRetryAttempts = 3,
+        UseJitter = true,
+        Delay = TimeSpan.FromSeconds(1)
+    };
 
     public static IConfigurationRoot BuildConfiguration(string basePath, string environmentName)
     {
@@ -44,13 +53,32 @@ internal static class WorkerConfiguration
             options.UseNpgsql(connectionString,
                 npgsql => npgsql.MigrationsAssembly(typeof(Program).Assembly.GetName().Name ?? "TalkingPointsSummary")));
 
-        services.AddHttpClient<ITalkingPointsApiClient, TalkingPointsApiClient>();
-        services.AddHttpClient<IMessageCategorizer, MessageCategorizer>();
+        services.AddHttpClient<ITalkingPointsApiClient, TalkingPointsApiClient>()
+            .AddResilienceHandler("talkingpoints-retry", static builder =>
+            {
+                builder.AddRetry(SharedRetryOptions);
+            });
+
+        services.AddHttpClient<IMessageCategorizer, MessageCategorizer>()
+            .AddResilienceHandler("anthropic-categorization-retry", static builder =>
+            {
+                builder.AddRetry(SharedRetryOptions);
+            });
+
         services.AddHttpClient<INewsletterScraper, NewsletterScraper>(client =>
-        {
-            client.Timeout = TimeSpan.FromSeconds(90);
-        });
-        services.AddHttpClient<ISummaryGenerator, SummaryGenerator>();
+            {
+                client.Timeout = TimeSpan.FromSeconds(90);
+            })
+            .AddResilienceHandler("browserless-retry", static builder =>
+            {
+                builder.AddRetry(SharedRetryOptions);
+            });
+
+        services.AddHttpClient<ISummaryGenerator, SummaryGenerator>()
+            .AddResilienceHandler("anthropic-summary-retry", static builder =>
+            {
+                builder.AddRetry(SharedRetryOptions);
+            });
 
         services.AddSingleton<IHostAddressResolver, HostAddressResolver>();
         services.AddScoped<INewsletterUrlValidator, NewsletterUrlValidator>();

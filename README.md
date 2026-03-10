@@ -80,6 +80,8 @@ Newsletter scraping now validates AI-supplied URLs before sending them to Browse
 
 TalkingPoints fetching now stops when it reaches the newest saved message ID, when feed timestamps move older than the newest saved message timestamp, or when `TalkingPointsApi:MaxPagesPerRun` is reached. The default page cap is `3` to prevent large historical fetches from hammering TalkingPoints in a single run.
 
+Outgoing HTTP calls now use the Microsoft resilience handler package with exponential backoff and jitter for transient failures on TalkingPoints, Anthropic, and Browserless requests. The retry policy is configured centrally in the worker's `HttpClient` registrations.
+
 ### 2. Build and run with Docker
 
 ```bash
