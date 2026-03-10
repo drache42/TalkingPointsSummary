@@ -77,6 +77,7 @@ internal static class WorkerConfiguration
     {
         _ = services.GetRequiredService<IOptions<AnthropicOptions>>().Value;
         _ = services.GetRequiredService<IOptions<BrowserlessOptions>>().Value;
+        _ = services.GetRequiredService<IOptions<DebugFeaturesOptions>>().Value;
         _ = services.GetRequiredService<IOptions<SmtpOptions>>().Value;
         _ = services.GetRequiredService<IOptions<PipelineScheduleOptions>>().Value;
     }
@@ -93,6 +94,10 @@ internal static class WorkerConfiguration
             .Bind(configuration.GetSection(BrowserlessOptions.SectionName))
             .ValidateDataAnnotations()
             .Validate(options => Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out _), "Browserless:BaseUrl must be a valid absolute URL.")
+            .ValidateOnStart();
+
+        services.AddOptions<DebugFeaturesOptions>()
+            .Bind(configuration.GetSection(DebugFeaturesOptions.SectionName))
             .ValidateOnStart();
 
         services.AddOptions<SmtpOptions>()

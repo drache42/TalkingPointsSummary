@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using TalkingPointsSummary.Configuration;
 using TalkingPointsSummary.Admin.Services;
 using TalkingPointsSummary.Data;
 using TalkingPointsSummary.Services;
@@ -13,6 +15,9 @@ public static class AdminServiceConfiguration
 
     public static void ConfigureApplicationServices(IServiceCollection services, IConfiguration configuration)
     {
+        services.AddOptions<DebugFeaturesOptions>()
+            .Bind(configuration.GetSection(DebugFeaturesOptions.SectionName));
+
         var connectionString = configuration.GetConnectionString(TalkingPointsConnectionName)
             ?? throw new InvalidOperationException(
                 "Missing required connection string 'TalkingPoints'. Configure ConnectionStrings:TalkingPoints via appsettings, user secrets, or environment variables.");
@@ -33,4 +38,10 @@ public static class AdminServiceConfiguration
             }
         });
     }
+
+    public static bool AreDebugFeaturesEnabled(IConfiguration configuration)
+        => DebugFeaturesOptions.IsEnabled(configuration);
+
+    public static bool ShouldBlockDebugRoute(PathString path, bool debugFeaturesEnabled)
+        => !debugFeaturesEnabled && path.StartsWithSegments("/debug");
 }

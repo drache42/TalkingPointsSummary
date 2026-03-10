@@ -24,12 +24,14 @@ if (builder.Configuration.GetValue<bool>("ManagePostgres", true))
         .WithReference(db)
         .WaitFor(db)
         .WithEnvironment("ConnectionStrings__TalkingPoints", db)
-        .WithEnvironment("ASPNETCORE_URLS", "http://127.0.0.1:5101");
+        .WithEnvironment("ASPNETCORE_URLS", "http://127.0.0.1:5101")
+        .WithEnvironment("DebugFeatures__Enabled", "true");
 
     admin = builder.AddProject<Projects.TalkingPointsSummary_Admin>("admin")
         .WithReference(db)
         .WaitFor(db)
         .WithEnvironment("ConnectionStrings__TalkingPoints", db)
+        .WithEnvironment("DebugFeatures__Enabled", "true")
         .WithEnvironment("WorkerDebugBaseUrl", "http://127.0.0.1:5101/");
 }
 else
@@ -40,10 +42,12 @@ else
 
     worker = builder.AddProject<Projects.TalkingPointsSummary>("worker")
         .WithEnvironment("ConnectionStrings__TalkingPoints", postgres)
-        .WithEnvironment("ASPNETCORE_URLS", "http://127.0.0.1:5101");
+        .WithEnvironment("ASPNETCORE_URLS", "http://127.0.0.1:5101")
+        .WithEnvironment("DebugFeatures__Enabled", "true");
 
     admin = builder.AddProject<Projects.TalkingPointsSummary_Admin>("admin")
         .WithEnvironment("ConnectionStrings__TalkingPoints", postgres)
+        .WithEnvironment("DebugFeatures__Enabled", "true")
         .WithEnvironment("WorkerDebugBaseUrl", "http://127.0.0.1:5101/");
 }
 

@@ -32,6 +32,7 @@ internal sealed class Program
             ?? Environments.Production;
 
         var configuration = BuildConfiguration(environmentName);
+        var debugFeaturesEnabled = DebugFeaturesOptions.IsEnabled(configuration);
 
         Log.Logger = new LoggerConfiguration()
             .ReadFrom.Configuration(configuration)
@@ -54,9 +55,9 @@ internal sealed class Program
             {
                 await RunCliAsync(args, configuration);
             }
-            else if (string.Equals(environmentName, Environments.Development, StringComparison.OrdinalIgnoreCase))
+            else if (debugFeaturesEnabled)
             {
-                await RunDevelopmentWorkerAsync(args, environmentName, configuration);
+                await RunDebugWorkerAsync(args, environmentName, configuration);
             }
             else
             {
@@ -118,7 +119,7 @@ internal sealed class Program
         await host.RunAsync();
     }
 
-    private static async Task RunDevelopmentWorkerAsync(
+    private static async Task RunDebugWorkerAsync(
         string[] args,
         string environmentName,
         IConfiguration configuration)
@@ -132,7 +133,8 @@ internal sealed class Program
 
         builder.Configuration.AddConfiguration(configuration);
 
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
+        if (string.Equals(environmentName, Environments.Development, StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
         {
             builder.WebHost.UseUrls("http://127.0.0.1:5101");
         }

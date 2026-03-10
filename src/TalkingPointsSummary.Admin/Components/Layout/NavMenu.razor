@@ -1,4 +1,4 @@
-@inject IWebHostEnvironment Environment
+@inject IOptions<DebugFeaturesOptions> DebugFeatures
 
 <ul class="nav nav-pills flex-column mb-auto">
     <li class="nav-item">
@@ -11,7 +11,7 @@
             Parents
         </NavLink>
     </li>
-    @if (Environment.IsDevelopment())
+    @if (DebugFeatures.Value.Enabled)
     {
         <li class="nav-item">
             <NavLink class="nav-link text-white" href="/debug" ActiveClass="active">

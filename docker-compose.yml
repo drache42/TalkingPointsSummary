@@ -15,7 +15,9 @@ services:
     environment:
       - ConnectionStrings__TalkingPoints=Host=postgres;Database=talkingpoints;Username=postgres;Password=postgres
       - Anthropic__ApiKey=${ANTHROPIC_API_KEY}
+      - ASPNETCORE_URLS=http://0.0.0.0:8080
       - Browserless__BaseUrl=http://browserless:3000
+      - DebugFeatures__Enabled=${DEBUG_FEATURES_ENABLED:-false}
       - Smtp__Host=${SMTP_HOST:-mailpit}
       - Smtp__Port=${SMTP_PORT:-1025}
       - Smtp__Username=${SMTP_USERNAME:-}
@@ -37,6 +39,8 @@ services:
         condition: service_healthy
     environment:
       - ConnectionStrings__TalkingPoints=Host=postgres;Database=talkingpoints;Username=postgres;Password=postgres
+      - DebugFeatures__Enabled=${DEBUG_FEATURES_ENABLED:-false}
+      - WorkerDebugBaseUrl=http://app:8080/
     ports:
       - "5100:8080"
 

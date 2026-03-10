@@ -40,6 +40,7 @@ The worker uses standard hierarchical .NET configuration sections.
 | `ConnectionStrings:TalkingPoints` | `ConnectionStrings__TalkingPoints` | PostgreSQL connection string |
 | `Anthropic:ApiKey` | `Anthropic__ApiKey` | Anthropic API key for Claude |
 | `Browserless:BaseUrl` | `Browserless__BaseUrl` | Browserless base URL |
+| `DebugFeatures:Enabled` | `DebugFeatures__Enabled` | Enables the Admin Debug page and worker debug trigger endpoint |
 | `Smtp:Host` | `Smtp__Host` | SMTP server hostname |
 | `Smtp:Port` | `Smtp__Port` | SMTP server port |
 | `Smtp:Username` | `Smtp__Username` | SMTP login username |
@@ -70,11 +71,15 @@ dotnet user-secrets set "Smtp:FromEmail" "you@example.com"
 
 Set `Smtp:Username` and `Smtp:Password` only if your SMTP server requires authentication. `appsettings.Development.json` already defaults to `localhost:1025` for Mailpit-style local SMTP.
 
+Set `DebugFeatures__Enabled=true` when you want the Admin Debug page and worker debug trigger endpoint available. Leave it unset or `false` to disable them.
+
 ### 2. Build and run with Docker
 
 ```bash
 docker compose up -d --build
 ```
+
+`docker-compose.yml` defaults `DebugFeatures__Enabled` to `false`. Set `DEBUG_FEATURES_ENABLED=true` before starting the stack if you want the debug tools enabled.
 
 The worker writes rolling log files to `/app/logs` inside the container. By default, `docker-compose.yml` bind-mounts that to `./docker-data/logs` on the host:
 

@@ -1,6 +1,6 @@
 @page "/debug"
 @rendermode InteractiveServer
-@inject IWebHostEnvironment Environment
+@inject IOptions<DebugFeaturesOptions> DebugFeatures
 @inject PipelineDebugClient PipelineDebugClient
 @inject IDbContextFactory<AppDbContext> DbFactory
 
@@ -8,10 +8,10 @@
 
 <h1 class="mb-3">Debug</h1>
 
-@if (!Environment.IsDevelopment())
+@if (!DebugFeatures.Value.Enabled)
 {
     <div class="alert alert-warning" role="alert">
-        Debug tools are only available in Development.
+        Debug tools are disabled.
     </div>
 }
 else

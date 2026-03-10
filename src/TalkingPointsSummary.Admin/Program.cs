@@ -6,6 +6,7 @@ using TalkingPointsSummary.Data;
 using TalkingPointsSummary.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+var debugFeaturesEnabled = AdminServiceConfiguration.AreDebugFeaturesEnabled(builder.Configuration);
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -22,6 +23,20 @@ if (!app.Environment.IsDevelopment())
 
 app.UseStaticFiles();
 app.UseAntiforgery();
+
+if (!debugFeaturesEnabled)
+{
+    app.Use(async (context, next) =>
+    {
+        if (AdminServiceConfiguration.ShouldBlockDebugRoute(context.Request.Path, debugFeaturesEnabled))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+
+        await next();
+    });
+}
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
