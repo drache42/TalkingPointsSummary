@@ -13,6 +13,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TalkingPointsSummary.Tests"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{DBB2F6CE-42AA-4444-97A1-A133B87A1E1E}"
 	ProjectSection(SolutionItems) = preProject
+		Directory.Packages.props = Directory.Packages.props
 		.env.example = .env.example
 		docker-compose.yml = docker-compose.yml
 		Dockerfile = Dockerfile
