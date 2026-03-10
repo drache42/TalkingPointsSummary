@@ -60,10 +60,13 @@ public enum PipelineStartStatus
 
 /// <summary>
 /// Background service that runs the weekly pipeline on schedule.
-/// Checks every minute whether it's time to run (default: Monday 8 AM).
+/// Waits for the next scheduled UTC run, retries within the scheduled hour when needed,
+/// and then advances to the following week after a successful evaluation.
 /// </summary>
 public class WeeklyPipelineService : BackgroundService
 {
+    private static readonly TimeSpan ScheduledWindow = TimeSpan.FromHours(1);
+    private static readonly TimeSpan RetryInterval = TimeSpan.FromMinutes(1);
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<WeeklyPipelineService> _logger;
     private readonly PipelineScheduleOptions _schedule;
@@ -102,30 +105,43 @@ public class WeeklyPipelineService : BackgroundService
             (DayOfWeek)_schedule.DayOfWeek,
             _schedule.Hour);
 
-        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1));
+        var scheduledWindowStartUtc = GetNextScheduledWindowStartUtc(_timeProvider.GetUtcDateTime());
+        var nextWakeUpUtc = GetInitialWakeUpUtc(_timeProvider.GetUtcDateTime(), scheduledWindowStartUtc);
 
-        while (await timer.WaitForNextTickAsync(stoppingToken))
+        while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 var now = _timeProvider.GetUtcDateTime();
-                if (ShouldRun(now))
-                {
-                    _logger.LogInformation("Schedule triggered - evaluating weekly pipeline run");
-                    var result = await TryRunScheduledPipelineAsync(now, stoppingToken);
-                    if (result == PipelineRunStatus.Completed)
-                    {
-                        continue;
-                    }
 
-                    if (result == PipelineRunStatus.AlreadyScheduled)
-                    {
-                        _logger.LogInformation("Scheduled pipeline run skipped because a run was already recorded for {Date}", now.Date);
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Scheduled pipeline run skipped because another run is already in progress");
-                    }
+                if (nextWakeUpUtc > now)
+                {
+                    _logger.LogInformation(
+                        "Next scheduled pipeline evaluation for {ScheduledDate} at {WakeUpUtc}",
+                        scheduledWindowStartUtc.Date,
+                        nextWakeUpUtc);
+                    await TimeProviderDelay.DelayAsync(_timeProvider, nextWakeUpUtc - now, stoppingToken);
+                }
+
+                _logger.LogInformation("Schedule triggered - evaluating weekly pipeline run for {Date}", scheduledWindowStartUtc.Date);
+                var result = await TryRunScheduledPipelineAsync(scheduledWindowStartUtc, stoppingToken);
+                if (result == PipelineRunStatus.Completed)
+                {
+                    scheduledWindowStartUtc = scheduledWindowStartUtc.AddDays(7);
+                    nextWakeUpUtc = scheduledWindowStartUtc;
+                    continue;
+                }
+
+                if (result == PipelineRunStatus.AlreadyScheduled)
+                {
+                    _logger.LogInformation("Scheduled pipeline run skipped because a run was already recorded for {Date}", scheduledWindowStartUtc.Date);
+                    scheduledWindowStartUtc = scheduledWindowStartUtc.AddDays(7);
+                    nextWakeUpUtc = scheduledWindowStartUtc;
+                }
+                else
+                {
+                    _logger.LogWarning("Scheduled pipeline run skipped because another run is already in progress");
+                    nextWakeUpUtc = GetRetryWakeUpUtc(_timeProvider.GetUtcDateTime(), scheduledWindowStartUtc);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -135,6 +151,7 @@ public class WeeklyPipelineService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error in weekly pipeline scheduler");
+                nextWakeUpUtc = GetRetryWakeUpUtc(_timeProvider.GetUtcDateTime(), scheduledWindowStartUtc);
             }
         }
 
@@ -143,7 +160,6 @@ public class WeeklyPipelineService : BackgroundService
 
     internal bool ShouldRun(DateTime now)
     {
-        // Check day of week and hour
         if ((int)now.DayOfWeek != _schedule.DayOfWeek)
             return false;
 
@@ -152,6 +168,56 @@ public class WeeklyPipelineService : BackgroundService
 
         return true;
     }
+
+    /// <summary>
+    /// Returns the scheduled window start to evaluate next.
+    /// If the worker starts during the scheduled hour, the current window is returned
+    /// so the run can be evaluated immediately.
+    /// </summary>
+    internal DateTime GetNextScheduledWindowStartUtc(DateTime now)
+    {
+        if (ShouldRun(now))
+        {
+            return GetScheduledWindowStartUtc(now);
+        }
+
+        var daysUntilScheduled = (_schedule.DayOfWeek - (int)now.DayOfWeek + 7) % 7;
+        var candidateDate = now.Date.AddDays(daysUntilScheduled);
+        var candidate = new DateTime(
+            candidateDate.Year,
+            candidateDate.Month,
+            candidateDate.Day,
+            _schedule.Hour,
+            0,
+            0,
+            DateTimeKind.Utc);
+
+        if (candidate <= now)
+        {
+            candidate = candidate.AddDays(7);
+        }
+
+        return candidate;
+    }
+
+    /// <summary>
+    /// Returns the next retry wake-up inside the current scheduled hour, or the next
+    /// weekly scheduled window once the current hour has elapsed.
+    /// </summary>
+    internal DateTime GetRetryWakeUpUtc(DateTime now, DateTime scheduledWindowStartUtc)
+    {
+        var retryWakeUpUtc = now.Add(RetryInterval);
+        var scheduledWindowEndUtc = scheduledWindowStartUtc.Add(ScheduledWindow);
+        return retryWakeUpUtc < scheduledWindowEndUtc
+            ? retryWakeUpUtc
+            : scheduledWindowStartUtc.AddDays(7);
+    }
+
+    private static DateTime GetInitialWakeUpUtc(DateTime now, DateTime scheduledWindowStartUtc)
+        => scheduledWindowStartUtc > now ? scheduledWindowStartUtc : now;
+
+    private DateTime GetScheduledWindowStartUtc(DateTime now)
+        => new(now.Year, now.Month, now.Day, _schedule.Hour, 0, 0, DateTimeKind.Utc);
 
     internal Task<PipelineRunStatus> TryRunScheduledPipelineAsync(DateTime now, CancellationToken ct = default)
         => TryRunPipelineAsync(ScheduleTrigger, parentId: null, scheduledDate: now.Date, ct);

@@ -194,7 +194,7 @@ The AppHost has its own configuration in `src/TalkingPointsSummary.AppHost/appse
 
 ## How the pipeline works
 
-1. The scheduler checks once per minute and runs on the configured UTC day and hour. The default schedule is Monday at 08:00 UTC.
+1. The scheduler waits for the next configured UTC day and hour, runs immediately if the worker starts during that scheduled hour, and retries once per minute within that same hour when a scheduled run is blocked or fails. The default schedule is Monday at 08:00 UTC.
 2. For each active parent, the worker fetches TalkingPoints feed pages of 20 messages each.
 3. Fetching stops when it reaches the newest stored message ID, when it sees a message older than the newest stored timestamp, when a short or empty page is returned, or when `TalkingPointsApi:MaxPagesPerRun` is reached.
 4. The deduplicator stores only messages whose `(ParentId, ExternalMessageId)` pair does not already exist in the database.

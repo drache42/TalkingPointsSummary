@@ -302,6 +302,7 @@ public class IntegrationTestFixture : IAsyncLifetime
         services.AddScoped<IMessageDeduplicator, MessageDeduplicator>();
         services.AddSingleton<IMarkdownConverter, MarkdownConverter>();
         services.AddScoped<IEmailSender, EmailSender>();
+        services.AddParentChildServices();
         services.AddScoped<PipelineOrchestrator>();
         services.AddSingleton<WeeklyPipelineService>();
 

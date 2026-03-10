@@ -211,7 +211,7 @@ internal sealed class Program
 
                 try
                 {
-                    await DelayAsync(timeProvider, TimeSpan.FromMilliseconds(delayMs), cancellationToken);
+                    await TimeProviderDelay.DelayAsync(timeProvider, TimeSpan.FromMilliseconds(delayMs), cancellationToken);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -249,47 +249,6 @@ internal sealed class Program
         {
             logger.LogCritical("{FailCount} startup check(s) failed. Aborting.", failCount);
             Environment.Exit(1);
-        }
-    }
-
-    private static Task DelayAsync(TimeProvider timeProvider, TimeSpan delay, CancellationToken cancellationToken)
-    {
-        if (delay <= TimeSpan.Zero)
-        {
-            return Task.CompletedTask;
-        }
-
-        if (cancellationToken.IsCancellationRequested)
-        {
-            return Task.FromCanceled(cancellationToken);
-        }
-
-        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var timer = timeProvider.CreateTimer(
-            static state => ((TaskCompletionSource)state!).TrySetResult(),
-            completion,
-            delay,
-            Timeout.InfiniteTimeSpan);
-
-        var registration = cancellationToken.Register(static state =>
-        {
-            var (taskCompletionSource, token) = ((TaskCompletionSource, CancellationToken))state!;
-            taskCompletionSource.TrySetCanceled(token);
-        }, (completion, cancellationToken));
-
-        return AwaitDelayAsync(completion.Task, timer, registration);
-    }
-
-    private static async Task AwaitDelayAsync(Task delayTask, ITimer timer, CancellationTokenRegistration registration)
-    {
-        try
-        {
-            await delayTask;
-        }
-        finally
-        {
-            registration.Dispose();
-            timer.Dispose();
         }
     }
 }

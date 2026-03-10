@@ -94,6 +94,34 @@ public class WeeklyPipelineServiceTests : IDisposable
         shouldRun.Should().Be(expected);
     }
 
+    [Theory]
+    [InlineData("2026-03-02T07:30:00Z", "2026-03-02T08:00:00Z")]
+    [InlineData("2026-03-02T08:30:00Z", "2026-03-02T08:00:00Z")]
+    [InlineData("2026-03-02T09:00:00Z", "2026-03-09T08:00:00Z")]
+    [InlineData("2026-03-01T10:00:00Z", "2026-03-02T08:00:00Z")]
+    public void GetNextScheduledWindowStartUtc_ReturnsExpectedOccurrence(string nowIso, string expectedIso)
+    {
+        var service = CreateService();
+
+        var nextScheduledUtc = service.GetNextScheduledWindowStartUtc(DateTime.Parse(nowIso, null, System.Globalization.DateTimeStyles.RoundtripKind));
+
+        nextScheduledUtc.Should().Be(DateTime.Parse(expectedIso, null, System.Globalization.DateTimeStyles.RoundtripKind));
+    }
+
+    [Theory]
+    [InlineData("2026-03-02T08:15:00Z", "2026-03-02T08:00:00Z", "2026-03-02T08:16:00Z")]
+    [InlineData("2026-03-02T08:59:30Z", "2026-03-02T08:00:00Z", "2026-03-09T08:00:00Z")]
+    public void GetRetryWakeUpUtc_RetriesWithinWindowOrAdvancesNextWeek(string nowIso, string scheduledStartIso, string expectedIso)
+    {
+        var service = CreateService();
+
+        var retryWakeUpUtc = service.GetRetryWakeUpUtc(
+            DateTime.Parse(nowIso, null, System.Globalization.DateTimeStyles.RoundtripKind),
+            DateTime.Parse(scheduledStartIso, null, System.Globalization.DateTimeStyles.RoundtripKind));
+
+        retryWakeUpUtc.Should().Be(DateTime.Parse(expectedIso, null, System.Globalization.DateTimeStyles.RoundtripKind));
+    }
+
     [Fact]
     public async Task TryRunFullPipelineAsync_AlreadyRunning_ReturnsAlreadyRunning()
     {
