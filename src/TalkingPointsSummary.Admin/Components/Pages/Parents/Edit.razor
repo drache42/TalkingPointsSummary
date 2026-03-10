@@ -42,14 +42,14 @@ else
                 <div class="mb-3">
                     <label class="form-label fw-semibold d-flex align-items-center gap-2">
                         TalkingPoints Token
-                        <InfoTooltip Text="Open Chrome DevTools (F12) → Network tab → visit app.talkingpts.org → click any API request → Request Headers → copy the x-token value" />
+                        <InfoTooltip Text="Sign in at families.talkingpts.org, open DevTools (F12), switch to Network, refresh, click any authenticated TalkingPoints request, then copy X-Token from Request Headers." />
                     </label>
                     <InputText @bind-Value="_model.TalkingPointsToken" class="form-control" />
                 </div>
                 <div class="mb-3">
                     <label class="form-label fw-semibold d-flex align-items-center gap-2">
                         TalkingPoints Contact ID
-                        <InfoTooltip Text="Open Chrome DevTools (F12) → Network tab → visit app.talkingpts.org → click any API request → Request Headers → copy the x-contactid value" />
+                        <InfoTooltip Text="Sign in at families.talkingpts.org, open DevTools (F12), switch to Network, refresh, click any authenticated TalkingPoints request, then copy X-Contactid from Request Headers." />
                     </label>
                     <InputText @bind-Value="_model.TalkingPointsContactId" class="form-control" />
                 </div>

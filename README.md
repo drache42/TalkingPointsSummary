@@ -138,6 +138,35 @@ volumes:
 
 ### 3. Add a parent and children
 
+#### Getting TalkingPoints credentials
+
+For most contributors, this is the hardest setup step. You need two values from your own TalkingPoints session:
+
+- `x-token`
+- `x-contactid`
+
+Walkthrough:
+
+1. Open `https://families.talkingpts.org/login` in your browser.
+2. Sign in with the phone number for the parent account you want this app to summarize.
+3. Enter the verification code TalkingPoints sends you.
+4. After you are signed in, open browser developer tools. `F12` works in most desktop browsers.
+5. With developer tools open, go to the `Network` tab.
+6. Refresh the page so the network list repopulates while dev tools are already open.
+7. Click almost any TalkingPoints API request in the left-hand request list.
+8. In the request details, open `Headers` and look under `Request Headers`.
+9. Copy the values for `X-Contactid` and `X-Token`.
+
+![TalkingPoints request headers in browser dev tools](docs/images/talkingpoints-devtools-request-headers.png)
+
+Tips:
+
+- If you do not see useful requests immediately, refresh again after you are fully signed in.
+- The exact request name is not important. Any authenticated TalkingPoints API request that includes those headers is enough.
+- Treat both values like credentials. Do not commit them to the repository.
+
+Use those values with the `add-parent` command:
+
 ```bash
 # Add a parent
 docker exec talking-points-summary \

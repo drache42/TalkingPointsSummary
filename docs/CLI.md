@@ -251,10 +251,27 @@ Checking configuration and connectivity...
 
 ## Finding TalkingPoints Credentials
 
-To get the `--token` and `--contact-id` values:
+This is usually the hardest part of setup. You need two values from your own authenticated TalkingPoints browser session:
 
-1. Log in to [TalkingPoints](https://app.talkingpts.org) in your browser
-2. Open browser Developer Tools (F12) → Network tab
-3. Navigate to Messages
-4. Find a request to `/api/parents/v3/messages/feed`
-5. Copy the `x-token` and `x-contactid` header values
+- `x-token`
+- `x-contactid`
+
+Walkthrough:
+
+1. Open [https://families.talkingpts.org/login](https://families.talkingpts.org/login).
+2. Enter the phone number for the parent account you want to summarize.
+3. Complete sign-in with the verification code TalkingPoints sends you.
+4. Once you are signed in, open browser developer tools. `F12` is the usual shortcut.
+5. In developer tools, open the `Network` tab.
+6. Refresh the page after the Network tab is already open.
+7. Click any authenticated TalkingPoints request in the left-hand request list.
+8. In `Headers`, look under `Request Headers`.
+9. Copy the values for `x-token` and `x-contactid`.
+
+![TalkingPoints request headers in browser dev tools](images/talkingpoints-devtools-request-headers.png)
+
+Notes:
+
+- The exact request name is not important as long as it is a logged-in TalkingPoints API request.
+- If the list is empty or missing the headers, refresh again after sign-in completes.
+- Treat these values like credentials and keep them out of source control.
