@@ -61,7 +61,7 @@ public class PipelineOrchestratorTests : IDisposable
         _mockEmailSender = new Mock<IEmailSender>();
 
         // Default setup: API returns empty, dedup returns empty
-        _mockApiClient.Setup(x => x.FetchMessagesAsync(It.IsAny<Parent>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+        _mockApiClient.Setup(x => x.FetchMessagesAsync(It.IsAny<Parent>(), It.IsAny<string?>(), It.IsAny<DateTime?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
         _mockDeduplicator.Setup(x => x.DeduplicateAndSaveAsync(It.IsAny<Parent>(), It.IsAny<List<TalkingPointsMessage>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
@@ -125,6 +125,8 @@ public class PipelineOrchestratorTests : IDisposable
             x => x.FetchMessagesAsync(
                 It.Is<Parent>(parent => parent.Id == _testParent.Id),
                 "latest-msg",
+                new DateTime(2026, 3, 2, 8, 0, 0, DateTimeKind.Utc),
+                null,
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }

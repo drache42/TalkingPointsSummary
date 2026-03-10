@@ -3,8 +3,10 @@ using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Moq.Protected;
+using TalkingPointsSummary.Configuration;
 using TalkingPointsSummary.Models;
 using TalkingPointsSummary.Services;
 
@@ -21,10 +23,13 @@ public class TalkingPointsApiClientTests
         EmailRecipients = "test@example.com"
     };
 
-    private static TalkingPointsApiClient CreateClient(HttpMessageHandler handler)
+    private static TalkingPointsApiClient CreateClient(HttpMessageHandler handler, TalkingPointsApiOptions? options = null)
     {
         var httpClient = new HttpClient(handler);
-        return new TalkingPointsApiClient(httpClient, NullLogger<TalkingPointsApiClient>.Instance);
+        return new TalkingPointsApiClient(
+            httpClient,
+            Options.Create(options ?? new TalkingPointsApiOptions()),
+            NullLogger<TalkingPointsApiClient>.Instance);
     }
 
     private static Mock<HttpMessageHandler> CreateMockHandler(HttpStatusCode statusCode, object? responseBody = null)
@@ -231,18 +236,92 @@ public class TalkingPointsApiClientTests
         requestedPages.Should().Equal(1, 2);
     }
 
+    [Fact]
+    public async Task FetchMessagesAsync_StopsWhenMessagesBecomeOlderThanNewestSavedTimestamp()
+    {
+        var pageOneMessages = Enumerable.Range(1, 20)
+            .Select(index => CreateApiMessage($"page1-{index}", new DateTime(2026, 3, 10, 12, 0, 0, DateTimeKind.Utc).AddMinutes(-index)))
+            .ToList();
+        var pageTwoMessages = new List<TalkingPointsMessage>
+        {
+            CreateApiMessage("page2-newer", new DateTime(2026, 3, 10, 10, 1, 0, DateTimeKind.Utc)),
+            CreateApiMessage("page2-older", new DateTime(2026, 3, 10, 9, 59, 0, DateTimeKind.Utc)),
+            CreateApiMessage("page2-oldest", new DateTime(2026, 3, 10, 9, 58, 0, DateTimeKind.Utc)),
+        };
+
+        var mockHandler = new Mock<HttpMessageHandler>();
+        mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage request, CancellationToken _) =>
+            {
+                var page = int.Parse(System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query)["page"]!);
+                var body = page switch
+                {
+                    1 => CreateApiResponse(pageOneMessages),
+                    2 => CreateApiResponse(pageTwoMessages),
+                    _ => CreateApiResponse([])
+                };
+
+                return new HttpResponseMessage
+                {
+                    StatusCode = HttpStatusCode.OK,
+                    Content = new StringContent(body, Encoding.UTF8, "application/json")
+                };
+            });
+
+        var client = CreateClient(mockHandler.Object);
+
+        var result = await client.FetchMessagesAsync(
+            _testParent,
+            stopBeforeSentAtUtc: new DateTime(2026, 3, 10, 10, 0, 0, DateTimeKind.Utc));
+
+        result.Select(message => message.Id).Should().Contain("page2-newer");
+        result.Should().NotContain(message => message.Id == "page2-older" || message.Id == "page2-oldest");
+    }
+
+    [Fact]
+    public async Task FetchMessagesAsync_RespectsMaxPagesPerRun()
+    {
+        var requestedPages = new List<int>();
+        var mockHandler = new Mock<HttpMessageHandler>();
+        mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((request, _) =>
+            {
+                requestedPages.Add(int.Parse(System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query)["page"]!));
+            })
+            .ReturnsAsync((HttpRequestMessage request, CancellationToken _) =>
+            {
+                var page = int.Parse(System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query)["page"]!);
+                var body = CreateApiResponse(Enumerable.Range(1, 20).Select(index => CreateApiMessage($"page{page}-{index}")).ToList());
+
+                return new HttpResponseMessage
+                {
+                    StatusCode = HttpStatusCode.OK,
+                    Content = new StringContent(body, Encoding.UTF8, "application/json")
+                };
+            });
+
+        var client = CreateClient(mockHandler.Object, new TalkingPointsApiOptions { MaxPagesPerRun = 3 });
+
+        var result = await client.FetchMessagesAsync(_testParent);
+
+        requestedPages.Should().Equal(1, 2, 3);
+        result.Should().HaveCount(60);
+    }
+
     private static string CreateApiResponse(List<TalkingPointsMessage> messages)
         => JsonSerializer.Serialize(new TalkingPointsApiResponse
         {
             Data = new TalkingPointsData { Messages = messages }
         });
 
-    private static TalkingPointsMessage CreateApiMessage(string id)
+    private static TalkingPointsMessage CreateApiMessage(string id, DateTime? sentAt = null)
         => new()
         {
             Id = id,
             Text = $"Message {id}",
-            CreatedAt = DateTime.UtcNow,
-            DisplayDate = DateTime.UtcNow
+            CreatedAt = sentAt ?? DateTime.UtcNow,
+            DisplayDate = sentAt ?? DateTime.UtcNow
         };
 }

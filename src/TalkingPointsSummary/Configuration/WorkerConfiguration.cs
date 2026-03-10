@@ -81,6 +81,7 @@ internal static class WorkerConfiguration
         _ = services.GetRequiredService<IOptions<BrowserlessOptions>>().Value;
         _ = services.GetRequiredService<IOptions<DebugFeaturesOptions>>().Value;
         _ = services.GetRequiredService<IOptions<NewsletterScrapingSecurityOptions>>().Value;
+        _ = services.GetRequiredService<IOptions<TalkingPointsApiOptions>>().Value;
         _ = services.GetRequiredService<IOptions<SmtpOptions>>().Value;
         _ = services.GetRequiredService<IOptions<PipelineScheduleOptions>>().Value;
     }
@@ -105,6 +106,11 @@ internal static class WorkerConfiguration
 
         services.AddOptions<NewsletterScrapingSecurityOptions>()
             .Bind(configuration.GetSection(NewsletterScrapingSecurityOptions.SectionName))
+            .ValidateOnStart();
+
+        services.AddOptions<TalkingPointsApiOptions>()
+            .Bind(configuration.GetSection(TalkingPointsApiOptions.SectionName))
+            .ValidateDataAnnotations()
             .ValidateOnStart();
 
         services.AddOptions<SmtpOptions>()

@@ -251,7 +251,7 @@ public class StartupValidator
             var checkName = $"TalkingPoints — {parent.Name}";
             try
             {
-                var messages = await _talkingPointsClient.FetchMessagesAsync(parent, ct: ct);
+                var messages = await _talkingPointsClient.FetchMessagesAsync(parent, maxPagesOverride: 1, ct: ct);
                 var (status, detail) = messages.Count > 0
                     ? (CheckStatus.Pass, $"API returned {messages.Count} message(s)")
                     : (CheckStatus.Warn, "API succeeded but returned 0 messages (token may be expired or no messages exist)");

@@ -2,6 +2,8 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using TalkingPointsSummary.Configuration;
 using TalkingPointsSummary.Models;
 
 namespace TalkingPointsSummary.Services;
@@ -13,24 +15,35 @@ public class TalkingPointsApiClient : ITalkingPointsApiClient
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<TalkingPointsApiClient> _logger;
+    private readonly TalkingPointsApiOptions _options;
     private const string BaseUrl = "https://app.talkingpts.org/api/parents/v3/messages/feed";
     private const int PageSize = 20;
 
-    public TalkingPointsApiClient(HttpClient httpClient, ILogger<TalkingPointsApiClient> logger)
+    public TalkingPointsApiClient(
+        HttpClient httpClient,
+        IOptions<TalkingPointsApiOptions> options,
+        ILogger<TalkingPointsApiClient> logger)
     {
         _httpClient = httpClient;
+        _options = options.Value;
         _logger = logger;
     }
 
-    public async Task<List<TalkingPointsMessage>> FetchMessagesAsync(Parent parent, string? stopAtMessageId = null, CancellationToken ct = default)
+    public async Task<List<TalkingPointsMessage>> FetchMessagesAsync(
+        Parent parent,
+        string? stopAtMessageId = null,
+        DateTime? stopBeforeSentAtUtc = null,
+        int? maxPagesOverride = null,
+        CancellationToken ct = default)
     {
         _logger.LogInformation("Fetching messages for parent {ParentName} (ID: {ParentId})", parent.Name, parent.Id);
 
         var messages = new List<TalkingPointsMessage>();
         var page = 1;
         var stopReached = false;
+        var maxPages = maxPagesOverride ?? _options.MaxPagesPerRun;
 
-        while (!stopReached)
+        while (!stopReached && page <= maxPages)
         {
             var pageMessages = await FetchPageAsync(parent, page, ct);
             if (pageMessages.Count == 0)
@@ -42,6 +55,15 @@ public class TalkingPointsApiClient : ITalkingPointsApiClient
             {
                 if (!string.IsNullOrWhiteSpace(stopAtMessageId)
                     && string.Equals(message.Id, stopAtMessageId, StringComparison.Ordinal))
+                {
+                    stopReached = true;
+                    break;
+                }
+
+                var messageSentAt = GetSentAtUtc(message);
+                if (stopBeforeSentAtUtc.HasValue
+                    && messageSentAt.HasValue
+                    && messageSentAt.Value < stopBeforeSentAtUtc.Value)
                 {
                     stopReached = true;
                     break;
@@ -59,14 +81,18 @@ public class TalkingPointsApiClient : ITalkingPointsApiClient
         }
 
         _logger.LogInformation(
-            "Fetched {Count} new candidate messages for parent {ParentName} across {PageCount} page(s). StopAtReached={StopReached}",
+            "Fetched {Count} new candidate messages for parent {ParentName} across {PageCount} page(s). StopAtReached={StopReached}. MaxPagesPerRun={MaxPagesPerRun}",
             messages.Count,
             parent.Name,
             page,
-            stopReached);
+            stopReached,
+            maxPages);
 
         return messages;
     }
+
+    private static DateTime? GetSentAtUtc(TalkingPointsMessage message)
+        => message.DisplayDate ?? message.CreatedAt;
 
     private async Task<List<TalkingPointsMessage>> FetchPageAsync(Parent parent, int page, CancellationToken ct)
     {
