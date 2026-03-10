@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="TalkingPointsSummary.Tests" />
+    <InternalsVisibleTo Include="TalkingPointsSummary.IntegrationTests" />
   </ItemGroup>
 
   <ItemGroup>
