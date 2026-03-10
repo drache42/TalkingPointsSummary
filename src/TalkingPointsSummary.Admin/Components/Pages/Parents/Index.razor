@@ -1,6 +1,6 @@
 @page "/parents"
 @rendermode InteractiveServer
-@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IParentService ParentService
 
 <PageTitle>Parents — TalkingPoints Admin</PageTitle>
 
@@ -66,11 +66,7 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        _parents = await db.Parents
-            .Include(p => p.Children)
-            .OrderBy(p => p.Name)
-            .ToListAsync();
+        _parents = await ParentService.ListParentsAsync();
         _loading = false;
     }
 }

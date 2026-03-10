@@ -114,7 +114,6 @@ docker exec talking-points-summary \
   --name "Clara" \
   --school "James Baldwin Elementary" \
   --grade 0 \
-  --year 2025 \
   --emoji "📚"
 
 docker exec talking-points-summary \
@@ -123,7 +122,6 @@ docker exec talking-points-summary \
   --name "Nolan" \
   --school "Cascadia Elementary" \
   --grade 3 \
-  --year 2025 \
   --emoji "🎓"
 ```
 

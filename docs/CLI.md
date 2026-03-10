@@ -57,7 +57,7 @@ Added parent 'Froehlich' with ID 1
 Add a child to an existing parent.
 
 ```bash
-add-child --parent-id <id> --name <name> --school <school> --grade <grade> --year <year> [--emoji <emoji>]
+add-child --parent-id <id> --name <name> --school <school> --grade <grade> [--year <year>] [--emoji <emoji>]
 ```
 
 | Option | Required | Description |
@@ -66,7 +66,7 @@ add-child --parent-id <id> --name <name> --school <school> --grade <grade> --yea
 | `--name` | Yes | Child's name |
 | `--school` | Yes | School name |
 | `--grade` | Yes | Starting grade level (0 = Kindergarten, 1 = 1st, etc.) |
-| `--year` | Yes | School year when the grade applies (e.g. 2025 = 2025-2026 school year) |
+| `--year` | No | School year when the grade applies (e.g. 2025 = 2025-2026 school year). Defaults to the current school year if omitted. |
 | `--emoji` | No | Emoji for summary headings (default: "📚") |
 
 **Example:**
@@ -77,7 +77,6 @@ add-child \
   --name "Clara" \
   --school "James Baldwin Elementary" \
   --grade 0 \
-  --year 2025 \
   --emoji "📚"
 ```
 

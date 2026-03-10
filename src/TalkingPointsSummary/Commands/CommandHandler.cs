@@ -1,9 +1,8 @@
+using System.ComponentModel.DataAnnotations;
 using System.CommandLine;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using TalkingPointsSummary.Data;
-using TalkingPointsSummary.Models;
 using TalkingPointsSummary.Pipeline;
+using TalkingPointsSummary.Services;
 
 namespace TalkingPointsSummary.Commands;
 
@@ -48,22 +47,17 @@ public static class CommandHandler
             var emails = parseResult.GetValue(emailsOption)!;
 
             using var scope = services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var parentService = scope.ServiceProvider.GetRequiredService<IParentService>();
 
-            var parent = new Parent
+            try
             {
-                Name = name,
-                TalkingPointsToken = token,
-                TalkingPointsContactId = contactId,
-                EmailRecipients = emails,
-                IsActive = true,
-                CreatedAt = DateTime.UtcNow
-            };
-
-            db.Parents.Add(parent);
-            await db.SaveChangesAsync();
-
-            Console.WriteLine($"Added parent '{name}' with ID {parent.Id}");
+                var parent = await parentService.CreateParentAsync(
+                    new CreateParentRequest(name, token, contactId, emails));
+                Console.WriteLine($"Added parent '{parent.Name}' with ID {parent.Id}");
+            }
+            catch (Exception ex) when (HandleCommandError(ex))
+            {
+            }
         });
 
         return command;
@@ -75,7 +69,7 @@ public static class CommandHandler
         var nameOption = new Option<string>("--name") { Description = "Child's name", Required = true };
         var schoolOption = new Option<string>("--school") { Description = "School name", Required = true };
         var gradeOption = new Option<int>("--grade") { Description = "Starting grade (0=Kindergarten)", Required = true };
-        var yearOption = new Option<int>("--year") { Description = "Starting school year (e.g. 2025)", Required = true };
+        var yearOption = new Option<int?>("--year") { Description = "Starting school year (e.g. 2025). Omit to use the current school year." };
         var emojiOption = new Option<string>("--emoji") { Description = "Emoji for summary headings", DefaultValueFactory = _ => "📚" };
 
         var command = new Command("add-child", "Add a child to a parent");
@@ -96,30 +90,20 @@ public static class CommandHandler
             var emoji = parseResult.GetValue(emojiOption)!;
 
             using var scope = services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var childService = scope.ServiceProvider.GetRequiredService<IChildService>();
+            var parentService = scope.ServiceProvider.GetRequiredService<IParentService>();
 
-            var parent = await db.Parents.FindAsync(parentId);
-            if (parent == null)
+            try
             {
-                Console.Error.WriteLine($"Parent with ID {parentId} not found");
-                Environment.ExitCode = 1;
-                return;
+                var child = await childService.CreateChildAsync(
+                    parentId,
+                    new CreateChildRequest(name, school, grade, year, emoji));
+                var parent = await parentService.GetParentAsync(parentId);
+                Console.WriteLine($"Added child '{child.Name}' (ID {child.Id}) to parent '{parent?.Name ?? parentId.ToString()}'");
             }
-
-            var child = new Child
+            catch (Exception ex) when (HandleCommandError(ex))
             {
-                ParentId = parentId,
-                Name = name,
-                School = school,
-                StartingGrade = grade,
-                StartingYear = year,
-                Emoji = emoji
-            };
-
-            db.Children.Add(child);
-            await db.SaveChangesAsync();
-
-            Console.WriteLine($"Added child '{name}' (ID {child.Id}) to parent '{parent.Name}'");
+            }
         });
 
         return command;
@@ -132,12 +116,8 @@ public static class CommandHandler
         command.SetAction(async (parseResult) =>
         {
             using var scope = services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-            var parents = await db.Parents
-                .Include(p => p.Children)
-                .OrderBy(p => p.Id)
-                .ToListAsync();
+            var parentService = scope.ServiceProvider.GetRequiredService<IParentService>();
+            var parents = await parentService.ListParentsAsync();
 
             if (parents.Count == 0)
             {
@@ -182,20 +162,17 @@ public static class CommandHandler
             var id = parseResult.GetValue(idOption);
 
             using var scope = services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var parentService = scope.ServiceProvider.GetRequiredService<IParentService>();
 
-            var parent = await db.Parents.FindAsync(id);
-            if (parent == null)
+            try
             {
-                Console.Error.WriteLine($"Parent with ID {id} not found");
-                Environment.ExitCode = 1;
-                return;
+                var parent = await parentService.GetParentAsync(id);
+                await parentService.DeleteParentAsync(id);
+                Console.WriteLine($"Removed parent '{parent?.Name ?? id.ToString()}' (ID {id}) and all associated data");
             }
-
-            db.Parents.Remove(parent);
-            await db.SaveChangesAsync();
-
-            Console.WriteLine($"Removed parent '{parent.Name}' (ID {id}) and all associated data");
+            catch (Exception ex) when (HandleCommandError(ex))
+            {
+            }
         });
 
         return command;
@@ -213,20 +190,27 @@ public static class CommandHandler
             var id = parseResult.GetValue(idOption);
 
             using var scope = services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-            var child = await db.Children.FindAsync(id);
-            if (child == null)
+            var parentService = scope.ServiceProvider.GetRequiredService<IParentService>();
+            var parent = (await parentService.ListParentsAsync())
+                .FirstOrDefault(candidateParent => candidateParent.Children.Any(child => child.Id == id));
+            if (parent == null)
             {
                 Console.Error.WriteLine($"Child with ID {id} not found");
                 Environment.ExitCode = 1;
                 return;
             }
 
-            db.Children.Remove(child);
-            await db.SaveChangesAsync();
+            var child = parent.Children.First(child => child.Id == id);
+            var childService = scope.ServiceProvider.GetRequiredService<IChildService>();
 
-            Console.WriteLine($"Removed child '{child.Name}' (ID {id})");
+            try
+            {
+                await childService.DeleteChildAsync(parent.Id, id);
+                Console.WriteLine($"Removed child '{child.Name}' (ID {id})");
+            }
+            catch (Exception ex) when (HandleCommandError(ex))
+            {
+            }
         });
 
         return command;
@@ -297,5 +281,19 @@ public static class CommandHandler
         });
 
         return command;
+    }
+
+    private static bool HandleCommandError(Exception ex)
+    {
+        switch (ex)
+        {
+            case ValidationException:
+            case EntityNotFoundException:
+                Console.Error.WriteLine(ex.Message);
+                Environment.ExitCode = 1;
+                return true;
+            default:
+                return false;
+        }
     }
 }

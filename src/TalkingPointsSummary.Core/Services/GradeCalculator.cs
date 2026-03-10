@@ -21,23 +21,14 @@ public static class GradeCalculator
     /// </summary>
     public static int GetCurrentGrade(int startingGrade, int startingYear, DateTime currentDate)
     {
-        // The starting year corresponds to the school year that begins in September.
-        // e.g., startingYear=2025 means the 2025-2026 school year (Sept 2025 - Aug 2026).
-
-        int currentSchoolYear;
-        if (currentDate.Month >= 9)
-        {
-            // Sept-Dec: we're in the school year that started this calendar year
-            currentSchoolYear = currentDate.Year;
-        }
-        else
-        {
-            // Jan-Aug: we're still in the school year that started last calendar year
-            currentSchoolYear = currentDate.Year - 1;
-        }
-
+        int currentSchoolYear = GetCurrentSchoolYear(currentDate);
         int yearsAdvanced = currentSchoolYear - startingYear;
         return startingGrade + Math.Max(0, yearsAdvanced);
+    }
+
+    public static int GetCurrentSchoolYear(DateTime currentDate)
+    {
+        return currentDate.Month >= 9 ? currentDate.Year : currentDate.Year - 1;
     }
 
     /// <summary>

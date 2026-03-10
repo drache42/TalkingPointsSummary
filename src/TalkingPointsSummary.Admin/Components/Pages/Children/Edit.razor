@@ -1,7 +1,8 @@
 @page "/parents/{ParentId:int}/children/create"
 @page "/parents/{ParentId:int}/children/{Id:int}/edit"
 @rendermode InteractiveServer
-@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IParentService ParentService
+@inject IChildService ChildService
 @inject NavigationManager Nav
 
 <PageTitle>@(Id.HasValue ? "Edit Child" : "Add Child") — TalkingPoints Admin</PageTitle>
@@ -27,6 +28,10 @@ else
             <EditForm Model="_model" OnValidSubmit="SaveAsync" FormName="child-form">
                 <DataAnnotationsValidator />
                 <ValidationSummary class="alert alert-danger" />
+                @if (!string.IsNullOrWhiteSpace(_errorMessage))
+                {
+                    <div class="alert alert-danger">@_errorMessage</div>
+                }
 
                 <div class="mb-3">
                     <label class="form-label fw-semibold">Name</label>
@@ -69,25 +74,27 @@ else
     private string _parentName = string.Empty;
     private bool _saving;
     private bool _notFound;
+    private string? _errorMessage;
 
     protected override async Task OnParametersSetAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
+        _notFound = false;
+        _errorMessage = null;
 
-        var parent = await db.Parents.FindAsync(ParentId);
+        var parent = await ParentService.GetParentAsync(ParentId);
         if (parent is null) { _notFound = true; return; }
         _parentName = parent.Name;
 
         if (Id.HasValue)
         {
-            var child = await db.Children.FindAsync(Id.Value);
-            if (child is null || child.ParentId != ParentId) { _notFound = true; return; }
+            var child = await ChildService.GetChildAsync(ParentId, Id.Value);
+            if (child is null) { _notFound = true; return; }
 
             _model = new ChildInputModel
             {
                 Name = child.Name,
                 School = child.School,
-                Grade = CurrentSchoolGrade(child),
+                Grade = GradeCalculator.GetCurrentGrade(child, DateTime.UtcNow),
                 Emoji = child.Emoji,
             };
         }
@@ -97,34 +104,37 @@ else
     private async Task SaveAsync()
     {
         _saving = true;
-        await using var db = await DbFactory.CreateDbContextAsync();
 
-        if (Id.HasValue)
+        try
         {
-            var child = await db.Children.FindAsync(Id.Value);
-            if (child is null) { _notFound = true; _saving = false; return; }
-
-            child.Name = _model.Name;
-            child.School = _model.School;
-            child.StartingGrade = _model.Grade;
-            child.StartingYear = CurrentSchoolYear();
-            child.Emoji = _model.Emoji;
-        }
-        else
-        {
-            db.Children.Add(new Child
+            if (Id.HasValue)
             {
-                ParentId = ParentId,
-                Name = _model.Name,
-                School = _model.School,
-                StartingGrade = _model.Grade,
-                StartingYear = CurrentSchoolYear(),
-                Emoji = _model.Emoji,
-            });
-        }
+                await ChildService.UpdateChildAsync(
+                    ParentId,
+                    Id.Value,
+                    new UpdateChildRequest(_model.Name, _model.School, _model.Grade, null, _model.Emoji));
+            }
+            else
+            {
+                await ChildService.CreateChildAsync(
+                    ParentId,
+                    new CreateChildRequest(_model.Name, _model.School, _model.Grade, null, _model.Emoji));
+            }
 
-        await db.SaveChangesAsync();
-        Nav.NavigateTo($"/parents/{ParentId}");
+            Nav.NavigateTo($"/parents/{ParentId}");
+        }
+        catch (ValidationException ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        catch (EntityNotFoundException)
+        {
+            _notFound = true;
+        }
+        finally
+        {
+            _saving = false;
+        }
     }
 
     private sealed class ChildInputModel
@@ -141,15 +151,4 @@ else
         public string Emoji { get; set; } = "📚";
     }
 
-    private static int CurrentSchoolYear()
-    {
-        var now = DateTime.UtcNow;
-        return now.Month >= 9 ? now.Year : now.Year - 1;
-    }
-
-    private static int CurrentSchoolGrade(Child child)
-    {
-        var current = CurrentSchoolYear();
-        return child.StartingGrade + Math.Max(0, current - child.StartingYear);
-    }
 }

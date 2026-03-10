@@ -1,6 +1,7 @@
 @page "/parents/{ParentId:int}/children/{Id:int}/delete"
 @rendermode InteractiveServer
-@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IParentService ParentService
+@inject IChildService ChildService
 @inject NavigationManager Nav
 
 <PageTitle>Delete Child — TalkingPoints Admin</PageTitle>
@@ -44,12 +45,10 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        _child = await db.Children
-            .FirstOrDefaultAsync(c => c.Id == Id && c.ParentId == ParentId);
+        _child = await ChildService.GetChildAsync(ParentId, Id);
         if (_child is not null)
         {
-            var parent = await db.Parents.FindAsync(ParentId);
+            var parent = await ParentService.GetParentAsync(ParentId);
             _parentName = parent?.Name ?? string.Empty;
         }
     }
@@ -57,12 +56,12 @@ else
     private async Task ConfirmDeleteAsync()
     {
         _deleting = true;
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var child = await db.Children.FindAsync(Id);
-        if (child is not null)
+        try
         {
-            db.Children.Remove(child);
-            await db.SaveChangesAsync();
+            await ChildService.DeleteChildAsync(ParentId, Id);
+        }
+        catch (EntityNotFoundException)
+        {
         }
         Nav.NavigateTo($"/parents/{ParentId}");
     }

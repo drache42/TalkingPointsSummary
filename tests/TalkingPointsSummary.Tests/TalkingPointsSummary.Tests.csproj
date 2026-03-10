@@ -29,6 +29,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\TalkingPointsSummary.Admin\TalkingPointsSummary.Admin.csproj" />
     <ProjectReference Include="..\..\src\TalkingPointsSummary\TalkingPointsSummary.csproj" />
   </ItemGroup>
 

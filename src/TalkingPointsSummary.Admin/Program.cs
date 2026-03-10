@@ -1,28 +1,16 @@
 using Microsoft.EntityFrameworkCore;
 using TalkingPointsSummary.Admin;
+using TalkingPointsSummary.Admin.Configuration;
 using TalkingPointsSummary.Admin.Services;
 using TalkingPointsSummary.Data;
+using TalkingPointsSummary.Services;
 
 var builder = WebApplication.CreateBuilder(args);
-
-var connectionString = builder.Configuration.GetConnectionString("TalkingPoints")
-    ?? throw new InvalidOperationException(
-        "Missing required connection string 'TalkingPoints'. Configure ConnectionStrings:TalkingPoints via appsettings, user secrets, or environment variables.");
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-builder.Services.AddDbContextFactory<AppDbContext>(options =>
-    options.UseNpgsql(connectionString));
-
-builder.Services.AddHttpClient<PipelineDebugClient>(client =>
-{
-    var workerDebugBaseUrl = builder.Configuration["WorkerDebugBaseUrl"];
-    if (Uri.TryCreate(workerDebugBaseUrl, UriKind.Absolute, out var baseAddress))
-    {
-        client.BaseAddress = baseAddress;
-    }
-});
+AdminServiceConfiguration.ConfigureApplicationServices(builder.Services, builder.Configuration);
 
 var app = builder.Build();
 

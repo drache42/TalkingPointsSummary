@@ -1,6 +1,6 @@
 @page "/parents/{Id:int}"
 @rendermode InteractiveServer
-@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IParentService ParentService
 
 <PageTitle>@(_parent?.Name ?? "Parent") — TalkingPoints Admin</PageTitle>
 
@@ -79,7 +79,7 @@ else
                         <td>@child.Emoji</td>
                         <td>@child.Name</td>
                         <td>@child.School</td>
-                        <td>@GradeLabel(CurrentGrade(child))</td>
+                        <td>@GradeCalculator.GetCurrentGradeLabel(child, DateTime.UtcNow)</td>
                         <td class="text-end">
                             <a href="/parents/@_parent.Id/children/@child.Id/edit" class="btn btn-sm btn-outline-primary">Edit</a>
                             <a href="/parents/@_parent.Id/children/@child.Id/delete" class="btn btn-sm btn-outline-danger">Delete</a>
@@ -98,26 +98,6 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        _parent = await db.Parents
-            .Include(p => p.Children)
-            .FirstOrDefaultAsync(p => p.Id == Id);
+        _parent = await ParentService.GetParentAsync(Id);
     }
-
-    private static int CurrentGrade(Child child)
-    {
-        var now = DateTime.UtcNow;
-        var currentSchoolYear = now.Month >= 9 ? now.Year : now.Year - 1;
-        return child.StartingGrade + Math.Max(0, currentSchoolYear - child.StartingYear);
-    }
-
-    private static string GradeLabel(int grade) => grade switch
-    {
-        0 => "Kindergarten",
-        1 => "1st Grade",
-        2 => "2nd Grade",
-        3 => "3rd Grade",
-        _ when grade >= 4 && grade <= 12 => $"{grade}th Grade",
-        _ => $"Grade {grade}"
-    };
 }

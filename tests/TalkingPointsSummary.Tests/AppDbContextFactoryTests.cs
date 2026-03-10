@@ -52,19 +52,26 @@ public class AppDbContextFactoryTests
     private sealed class CurrentDirectoryScope : IDisposable
     {
         private readonly string _originalDirectory;
-        private readonly string? _originalEnvironment;
+        private readonly string? _originalDotnetEnvironment;
+        private readonly string? _originalAspnetcoreEnvironment;
+        private readonly string? _originalConnectionString;
 
         public CurrentDirectoryScope(string newDirectory)
         {
             _originalDirectory = Directory.GetCurrentDirectory();
-            _originalEnvironment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+            _originalDotnetEnvironment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+            _originalAspnetcoreEnvironment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+            _originalConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__TalkingPoints");
             Directory.SetCurrentDirectory(newDirectory);
+            Environment.SetEnvironmentVariable("ConnectionStrings__TalkingPoints", null);
         }
 
         public void Dispose()
         {
             Directory.SetCurrentDirectory(_originalDirectory);
-            Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", _originalEnvironment);
+            Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", _originalDotnetEnvironment);
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", _originalAspnetcoreEnvironment);
+            Environment.SetEnvironmentVariable("ConnectionStrings__TalkingPoints", _originalConnectionString);
         }
     }
 

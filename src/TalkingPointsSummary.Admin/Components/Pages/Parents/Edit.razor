@@ -1,7 +1,7 @@
 @page "/parents/create"
 @page "/parents/{Id:int}/edit"
 @rendermode InteractiveServer
-@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IParentService ParentService
 @inject NavigationManager Nav
 
 <PageTitle>@(Id.HasValue ? "Edit Parent" : "Add Parent") — TalkingPoints Admin</PageTitle>
@@ -30,6 +30,10 @@ else
             <EditForm Model="_model" OnValidSubmit="SaveAsync" FormName="parent-form">
                 <DataAnnotationsValidator />
                 <ValidationSummary class="alert alert-danger" />
+                @if (!string.IsNullOrWhiteSpace(_errorMessage))
+                {
+                    <div class="alert alert-danger">@_errorMessage</div>
+                }
 
                 <div class="mb-3">
                     <label class="form-label fw-semibold">Name</label>
@@ -74,13 +78,16 @@ else
     private string _originalName = string.Empty;
     private bool _saving;
     private bool _notFound;
+    private string? _errorMessage;
 
     protected override async Task OnParametersSetAsync()
     {
+        _notFound = false;
+        _errorMessage = null;
+
         if (!Id.HasValue) return;
 
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var parent = await db.Parents.FindAsync(Id.Value);
+        var parent = await ParentService.GetParentAsync(Id.Value);
         if (parent is null) { _notFound = true; return; }
 
         _originalName = parent.Name;
@@ -97,34 +104,45 @@ else
     private async Task SaveAsync()
     {
         _saving = true;
-        await using var db = await DbFactory.CreateDbContextAsync();
 
-        if (Id.HasValue)
+        try
         {
-            var parent = await db.Parents.FindAsync(Id.Value);
-            if (parent is null) { _notFound = true; _saving = false; return; }
-
-            parent.Name = _model.Name;
-            parent.TalkingPointsToken = _model.TalkingPointsToken;
-            parent.TalkingPointsContactId = _model.TalkingPointsContactId;
-            parent.EmailRecipients = _model.EmailRecipients;
-            parent.IsActive = _model.IsActive;
-        }
-        else
-        {
-            db.Parents.Add(new Parent
+            if (Id.HasValue)
             {
-                Name = _model.Name,
-                TalkingPointsToken = _model.TalkingPointsToken,
-                TalkingPointsContactId = _model.TalkingPointsContactId,
-                EmailRecipients = _model.EmailRecipients,
-                IsActive = _model.IsActive,
-                CreatedAt = DateTime.UtcNow,
-            });
-        }
+                await ParentService.UpdateParentAsync(
+                    Id.Value,
+                    new UpdateParentRequest(
+                        _model.Name,
+                        _model.TalkingPointsToken,
+                        _model.TalkingPointsContactId,
+                        _model.EmailRecipients,
+                        _model.IsActive));
+            }
+            else
+            {
+                await ParentService.CreateParentAsync(
+                    new CreateParentRequest(
+                        _model.Name,
+                        _model.TalkingPointsToken,
+                        _model.TalkingPointsContactId,
+                        _model.EmailRecipients,
+                        _model.IsActive));
+            }
 
-        await db.SaveChangesAsync();
-        Nav.NavigateTo("/parents");
+            Nav.NavigateTo("/parents");
+        }
+        catch (ValidationException ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        catch (EntityNotFoundException)
+        {
+            _notFound = true;
+        }
+        finally
+        {
+            _saving = false;
+        }
     }
 
     private sealed class ParentInputModel
