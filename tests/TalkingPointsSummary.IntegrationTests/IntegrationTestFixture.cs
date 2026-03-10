@@ -182,6 +182,13 @@ public class IntegrationTestFixture : IAsyncLifetime
         {
             BaseUrl = BrowserlessUrl,
         }));
+        services.AddSingleton(Options.Create(new NewsletterScrapingSecurityOptions
+        {
+            Enabled = true,
+            RequireHttps = true,
+            AllowedHosts = ["host.docker.internal"],
+            AllowHttpHosts = ["host.docker.internal"],
+        }));
         services.AddSingleton(Options.Create(new SmtpOptions
         {
             Host = MailpitSmtpHost,
@@ -219,6 +226,8 @@ public class IntegrationTestFixture : IAsyncLifetime
         services.AddHttpClient<ISummaryGenerator, SummaryGenerator>()
             .AddHttpMessageHandler(() => new UrlRewritingHandler(wireMockUri));
 
+        services.AddSingleton<IHostAddressResolver, HostAddressResolver>();
+        services.AddScoped<INewsletterUrlValidator, NewsletterUrlValidator>();
         services.AddScoped<IMessageDeduplicator, MessageDeduplicator>();
         services.AddSingleton<IMarkdownConverter, MarkdownConverter>();
         services.AddScoped<IEmailSender, EmailSender>();

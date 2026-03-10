@@ -41,6 +41,8 @@ The worker uses standard hierarchical .NET configuration sections.
 | `Anthropic:ApiKey` | `Anthropic__ApiKey` | Anthropic API key for Claude |
 | `Browserless:BaseUrl` | `Browserless__BaseUrl` | Browserless base URL |
 | `DebugFeatures:Enabled` | `DebugFeatures__Enabled` | Enables the Admin Debug page and worker debug trigger endpoint |
+| `NewsletterScrapingSecurity:Enabled` | `NewsletterScrapingSecurity__Enabled` | Enables newsletter URL validation before Browserless fetches a page |
+| `NewsletterScrapingSecurity:RequireHttps` | `NewsletterScrapingSecurity__RequireHttps` | Requires HTTPS for newsletter URLs except for explicitly allowed HTTP hosts |
 | `Smtp:Host` | `Smtp__Host` | SMTP server hostname |
 | `Smtp:Port` | `Smtp__Port` | SMTP server port |
 | `Smtp:Username` | `Smtp__Username` | SMTP login username |
@@ -72,6 +74,8 @@ dotnet user-secrets set "Smtp:FromEmail" "you@example.com"
 Set `Smtp:Username` and `Smtp:Password` only if your SMTP server requires authentication. `appsettings.Development.json` already defaults to `localhost:1025` for Mailpit-style local SMTP.
 
 Set `DebugFeatures__Enabled=true` when you want the Admin Debug page and worker debug trigger endpoint available. Leave it unset or `false` to disable them.
+
+Newsletter scraping now validates AI-supplied URLs before sending them to Browserless. By default only public HTTPS URLs are allowed. Development and test environments can opt specific hosts into `AllowedHosts` and `AllowHttpHosts` when Browserless must scrape host-served content such as `host.docker.internal`.
 
 ### 2. Build and run with Docker
 

@@ -52,6 +52,8 @@ internal static class WorkerConfiguration
         });
         services.AddHttpClient<ISummaryGenerator, SummaryGenerator>();
 
+        services.AddSingleton<IHostAddressResolver, HostAddressResolver>();
+        services.AddScoped<INewsletterUrlValidator, NewsletterUrlValidator>();
         services.AddScoped<IMessageDeduplicator, MessageDeduplicator>();
         services.AddSingleton<IMarkdownConverter, MarkdownConverter>();
         services.AddScoped<IEmailSender, EmailSender>();
@@ -78,6 +80,7 @@ internal static class WorkerConfiguration
         _ = services.GetRequiredService<IOptions<AnthropicOptions>>().Value;
         _ = services.GetRequiredService<IOptions<BrowserlessOptions>>().Value;
         _ = services.GetRequiredService<IOptions<DebugFeaturesOptions>>().Value;
+        _ = services.GetRequiredService<IOptions<NewsletterScrapingSecurityOptions>>().Value;
         _ = services.GetRequiredService<IOptions<SmtpOptions>>().Value;
         _ = services.GetRequiredService<IOptions<PipelineScheduleOptions>>().Value;
     }
@@ -98,6 +101,10 @@ internal static class WorkerConfiguration
 
         services.AddOptions<DebugFeaturesOptions>()
             .Bind(configuration.GetSection(DebugFeaturesOptions.SectionName))
+            .ValidateOnStart();
+
+        services.AddOptions<NewsletterScrapingSecurityOptions>()
+            .Bind(configuration.GetSection(NewsletterScrapingSecurityOptions.SectionName))
             .ValidateOnStart();
 
         services.AddOptions<SmtpOptions>()

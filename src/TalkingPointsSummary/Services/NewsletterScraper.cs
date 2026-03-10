@@ -13,15 +13,18 @@ public class NewsletterScraper : INewsletterScraper
 {
     private readonly HttpClient _httpClient;
     private readonly BrowserlessOptions _browserless;
+    private readonly INewsletterUrlValidator _newsletterUrlValidator;
     private readonly ILogger<NewsletterScraper> _logger;
 
     public NewsletterScraper(
         HttpClient httpClient,
         IOptions<BrowserlessOptions> browserless,
+        INewsletterUrlValidator newsletterUrlValidator,
         ILogger<NewsletterScraper> logger)
     {
         _httpClient = httpClient;
         _browserless = browserless.Value;
+        _newsletterUrlValidator = newsletterUrlValidator;
         _logger = logger;
     }
 
@@ -30,6 +33,13 @@ public class NewsletterScraper : INewsletterScraper
     /// </summary>
     public async Task<string?> ScrapeAsync(string url, CancellationToken ct = default)
     {
+        var validation = await _newsletterUrlValidator.ValidateAsync(url, ct);
+        if (!validation.Allowed)
+        {
+            _logger.LogWarning("Blocked newsletter URL {Url}. Reason: {Reason}", url, validation.Reason);
+            return null;
+        }
+
         _logger.LogInformation("Scraping newsletter URL: {Url}", url);
 
         var scrapeUrl = $"{_browserless.BaseUrl.TrimEnd('/')}/scrape";

@@ -53,10 +53,13 @@ public class NewsletterScraperLiveTests : IAsyncLifetime
         var scraper = new NewsletterScraper(
             httpClient,
             Options.Create(new BrowserlessOptions { BaseUrl = "http://browserless.test" }),
+            new NewsletterUrlValidator(
+                Options.Create(new NewsletterScrapingSecurityOptions()),
+                new StubHostAddressResolver(Array.Empty<IPAddress>())),
             loggerFactory.CreateLogger<NewsletterScraper>());
 
         // Act
-        var url = "http://example.test/does-not-exist.html";
+        var url = "https://example.test/does-not-exist.html";
         var result = await scraper.ScrapeAsync(url, CancellationToken.None);
 
         // Assert
@@ -76,5 +79,18 @@ public class NewsletterScraperLiveTests : IAsyncLifetime
         {
             return Task.FromResult(_handler(request));
         }
+    }
+
+    private sealed class StubHostAddressResolver : IHostAddressResolver
+    {
+        private readonly IPAddress[] _addresses;
+
+        public StubHostAddressResolver(IPAddress[] addresses)
+        {
+            _addresses = addresses;
+        }
+
+        public Task<IPAddress[]> GetHostAddressesAsync(string host, CancellationToken cancellationToken = default)
+            => Task.FromResult(_addresses);
     }
 }

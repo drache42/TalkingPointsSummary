@@ -202,6 +202,7 @@ public class PipelineOrchestratorTests : IDisposable
         var savedItem = await _db.NewsItems.SingleAsync();
         savedItem.SourceType.Should().Be(SourceType.MessageText);
         savedItem.NewsContent.Should().Be("Original message text");
+        savedItem.NewsletterUrl.Should().Be("https://www.smore.com/abc");
     }
 
     [Fact]

@@ -12,11 +12,18 @@ namespace TalkingPointsSummary.Tests;
 
 public class NewsletterScraperTests
 {
-    private static NewsletterScraper CreateScraper(HttpMessageHandler handler)
+    private static NewsletterScraper CreateScraper(
+        HttpMessageHandler handler,
+        NewsletterScrapingSecurityOptions? securityOptions = null,
+        IHostAddressResolver? hostAddressResolver = null)
     {
         var httpClient = new HttpClient(handler);
         var options = Options.Create(new BrowserlessOptions { BaseUrl = "http://localhost:3000" });
-        return new NewsletterScraper(httpClient, options, NullLogger<NewsletterScraper>.Instance);
+        var security = Options.Create(securityOptions ?? new NewsletterScrapingSecurityOptions());
+        var validator = new NewsletterUrlValidator(
+            security,
+            hostAddressResolver ?? new StubHostAddressResolver([IPAddress.Parse("93.184.216.34")]));
+        return new NewsletterScraper(httpClient, options, validator, NullLogger<NewsletterScraper>.Instance);
     }
 
     private static Mock<HttpMessageHandler> CreateMockHandler(HttpStatusCode statusCode, string responseBody)
@@ -89,5 +96,67 @@ public class NewsletterScraperTests
         var result = await scraper.ScrapeAsync("https://www.smore.com/abc");
 
         result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ScrapeAsync_LoopbackUrl_ReturnsNullWithoutCallingBrowserless()
+    {
+        var mockHandler = new Mock<HttpMessageHandler>(MockBehavior.Strict);
+        var scraper = CreateScraper(mockHandler.Object);
+
+        var result = await scraper.ScrapeAsync("http://127.0.0.1:8080/private");
+
+        result.Should().BeNull();
+        mockHandler.Protected().Verify(
+            "SendAsync",
+            Times.Never(),
+            ItExpr.IsAny<HttpRequestMessage>(),
+            ItExpr.IsAny<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ScrapeAsync_AllowedHostOverHttp_CallsBrowserless()
+    {
+        var responseBody = JsonSerializer.Serialize(new
+        {
+            data = new[]
+            {
+                new
+                {
+                    results = new[]
+                    {
+                        new { text = "Scraped newsletter content here" }
+                    }
+                }
+            }
+        });
+
+        var mockHandler = CreateMockHandler(HttpStatusCode.OK, responseBody);
+        var scraper = CreateScraper(
+            mockHandler.Object,
+            new NewsletterScrapingSecurityOptions
+            {
+                Enabled = true,
+                RequireHttps = true,
+                AllowedHosts = ["host.docker.internal"],
+                AllowHttpHosts = ["host.docker.internal"]
+            });
+
+        var result = await scraper.ScrapeAsync("http://host.docker.internal:5001/newsletter.html");
+
+        result.Should().Be("Scraped newsletter content here");
+    }
+
+    private sealed class StubHostAddressResolver : IHostAddressResolver
+    {
+        private readonly IPAddress[] _addresses;
+
+        public StubHostAddressResolver(IPAddress[]? addresses = null)
+        {
+            _addresses = addresses ?? [];
+        }
+
+        public Task<IPAddress[]> GetHostAddressesAsync(string host, CancellationToken cancellationToken = default)
+            => Task.FromResult(_addresses);
     }
 }
