@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using DotNet.Testcontainers.Configurations;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using Microsoft.AspNetCore.Builder;
@@ -34,11 +35,14 @@ namespace TalkingPointsSummary.IntegrationTests;
 /// </summary>
 public class IntegrationTestFixture : IAsyncLifetime
 {
+    private const string TestcontainersHostAlias = "host.testcontainers.internal";
+
     private PostgreSqlContainer _postgres = null!;
     private IContainer _mailpit = null!;
     private IContainer _browserless = null!;
     private WireMockServer _wireMock = null!;
     private WebApplication _contentServer = null!;
+    private int _contentServerPort;
 
     /// <summary>
     /// Connection string for the PostgreSQL test container.
@@ -130,6 +134,9 @@ public class IntegrationTestFixture : IAsyncLifetime
     /// </summary>
     public async Task InitializeAsync()
     {
+        await StartContentServerAsync();
+        await TestcontainersSettings.ExposeHostPortsAsync((ushort)_contentServerPort);
+
         // Start containers in parallel
         _postgres = new PostgreSqlBuilder("postgres:15-alpine")
             .WithDatabase("talkingpoints")
@@ -163,9 +170,6 @@ public class IntegrationTestFixture : IAsyncLifetime
 
         // Start WireMock
         _wireMock = WireMockServer.Start();
-
-        // Start content server
-        await StartContentServerAsync();
 
         // Run EF migrations
         await RunMigrationsAsync();
@@ -257,8 +261,8 @@ public class IntegrationTestFixture : IAsyncLifetime
         {
             Enabled = true,
             RequireHttps = true,
-            AllowedHosts = ["host.docker.internal"],
-            AllowHttpHosts = ["host.docker.internal"],
+            AllowedHosts = ["host.docker.internal", TestcontainersHostAlias],
+            AllowHttpHosts = ["host.docker.internal", TestcontainersHostAlias],
         }));
         services.AddSingleton(Options.Create(new SmtpOptions
         {
@@ -533,8 +537,10 @@ public class IntegrationTestFixture : IAsyncLifetime
         var boundAddress = serverAddresses!.Addresses.First();
         var uri = new Uri(boundAddress);
 
-        // Browserless runs in Docker and needs host.docker.internal to reach the host
-        ContentServerUrl = $"http://host.docker.internal:{uri.Port}";
+        _contentServerPort = uri.Port;
+
+        // Containers reach the test host through Testcontainers' forwarded host alias.
+        ContentServerUrl = $"http://{TestcontainersHostAlias}:{uri.Port}";
     }
 
     private async Task RunMigrationsAsync()
