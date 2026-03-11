@@ -74,7 +74,7 @@ function Test-Yes {
 
 function Get-VersionedTags {
     # Only consider tags that match the repository's release semver format.
-    $pattern = '^[vV](?<Major>\d+)\.(?<Minor>\d+)\.(?<Patch>\d+)$'
+    $pattern = '^v(?<Major>\d+)\.(?<Minor>\d+)\.(?<Patch>\d+)$'
 
     $tags = Invoke-Git -Arguments @('tag', '--list', 'v*.*.*')
     $versionedTags = foreach ($tag in $tags) {
