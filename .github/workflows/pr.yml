@@ -122,7 +122,7 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-            if ('${{ steps.unit_tests.outcome }}' -eq 'failure' -or '${{ steps.integration_tests.outcome }}' -eq 'failure') {
+          if ('${{ steps.unit_tests.outcome }}' -eq 'failure' -or '${{ steps.integration_tests.outcome }}' -eq 'failure') {
             throw 'One or more test suites failed.'
           }
 
