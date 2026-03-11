@@ -27,6 +27,17 @@ public class InfrastructureDockerfileTests
         dockerfile.Should().NotContain("RUN dotnet publish -c Release -o /app/publish --no-restore");
     }
 
+    [Fact]
+    public void DockerCompose_AdminPersistsDataProtectionKeys()
+    {
+        var repoRoot = FindRepositoryRoot();
+        var composePath = Path.Combine(repoRoot, "infra", "docker-compose.yml");
+        var compose = File.ReadAllText(composePath);
+
+        compose.Should().Contain("DataProtection__KeysDirectory=/var/app/data-protection-keys");
+        compose.Should().Contain("${ADMIN_DATA_PROTECTION_KEYS_PATH:-../runtime-data/admin-data-protection-keys}:/var/app/data-protection-keys");
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

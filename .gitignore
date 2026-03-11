@@ -5,6 +5,8 @@
 
 # Local developer credentials — never commit
 appsettings.Local.json
+docker-data/
+runtime-data/
 
 # User-specific files
 *.rsuser

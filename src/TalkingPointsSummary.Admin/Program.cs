@@ -11,6 +11,11 @@ var debugFeaturesEnabled = AdminServiceConfiguration.AreDebugFeaturesEnabled(bui
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+AdminDataProtectionConfiguration.ConfigureDataProtection(
+    builder.Services,
+    builder.Configuration,
+    AdminDataProtectionConfiguration.IsRunningInContainer());
+
 AdminServiceConfiguration.ConfigureApplicationServices(builder.Services, builder.Configuration);
 
 var app = builder.Build();

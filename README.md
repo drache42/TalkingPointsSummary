@@ -76,6 +76,7 @@ That starts:
 - PostgreSQL at `localhost:5432`
 
 The Compose worker is not published on a host port. The admin container talks to it internally at `http://app:8080/`.
+The Compose stack stores bind-mounted runtime state under `runtime-data/` by default. That includes the admin DataProtection key ring at `runtime-data/admin-data-protection-keys`, so protected state survives container restarts.
 
 #### Aspire AppHost
 
@@ -179,6 +180,15 @@ The worker loads configuration in this order:
 | `Smtp:FromEmail` | `Smtp__FromEmail` | empty in base config, `dev@example.com` in Development | Yes | Sender address |
 | `PipelineSchedule:DayOfWeek` | `PipelineSchedule__DayOfWeek` | `1` | No | Weekly schedule day in UTC, where `0=Sunday` and `1=Monday` |
 | `PipelineSchedule:Hour` | `PipelineSchedule__Hour` | `8` | No | Weekly schedule hour in UTC |
+
+### Admin settings
+
+| Setting | Environment variable | Default | Required | Notes |
+| --- | --- | --- | --- | --- |
+| `WorkerDebugBaseUrl` | `WorkerDebugBaseUrl` | empty | No | Base URL used by the admin debug page to call the worker debug endpoint |
+| `DataProtection:KeysDirectory` | `DataProtection__KeysDirectory` | empty outside containers; `/var/app/data-protection-keys` in containers | No | Set this to a persistent directory for any deployment where the admin app must keep cookies and antiforgery state across restarts |
+
+For non-Compose deployments, mount a persistent directory into the admin container and set `DataProtection__KeysDirectory` to that in-container path.
 
 ### AppHost settings
 
