@@ -15,7 +15,7 @@ For a release tag like `v1.2.3`, the workflow promotes images to:
 - `1.2`
 - `latest`
 
-The release tag must point to the latest commit on `origin/main`.
+The release tag must point to a commit that is contained in `origin/main`. When using `Publish-ReleaseTag.ps1`, the script additionally enforces that the tag is created at the latest `origin/main` commit.
 
 ## Versioning Rules
 

@@ -74,7 +74,7 @@ function Test-Yes {
 
 function Get-VersionedTags {
     # Only consider tags that match the repository's release semver format.
-    $pattern = '^[vV](?<Major>\d+)\.(?<Minor>\d+)\.(?<Patch>\d+)$'
+    $pattern = '^v(?<Major>\d+)\.(?<Minor>\d+)\.(?<Patch>\d+)$'
 
     $tags = Invoke-Git -Arguments @('tag', '--list', 'v*.*.*')
     $versionedTags = foreach ($tag in $tags) {
@@ -166,7 +166,7 @@ else {
 $continueResponse = Read-Host 'Continue to version selection? [y/N]'
 if (-not (Test-Yes -Value $continueResponse)) {
     Write-Host 'Cancelled. No tag was created.' -ForegroundColor Yellow
-    exit 0
+    return
 }
 
 $tagName = (Read-Host 'Enter the release tag (example: v1.0.0)').Trim()
@@ -177,10 +177,7 @@ if ($LASTEXITCODE -eq 0) {
     throw "Tag $tagName already exists locally."
 }
 
-$remoteTagSha = & git ls-remote --tags origin "refs/tags/$tagName" 2>$null
-if ($LASTEXITCODE -ne 0) {
-    throw "Failed to query origin for tag $tagName."
-}
+$remoteTagSha = Invoke-Git -Arguments @('ls-remote', '--tags', 'origin', "refs/tags/$tagName")
 
 if (-not [string]::IsNullOrWhiteSpace(($remoteTagSha | Out-String))) {
     throw "Tag $tagName already exists on origin."
@@ -200,13 +197,13 @@ else {
 $pushResponse = Read-Host 'Create and push this tag? [y/N]'
 if (-not (Test-Yes -Value $pushResponse)) {
     Write-Host 'Cancelled. No tag was created.' -ForegroundColor Yellow
-    exit 0
+    return
 }
 
 if ($DryRun) {
     Write-Host ''
     Write-Host ("Dry run complete. Tag {0} is valid for commit {1}, and no changes were made." -f $tagName, $headSha) -ForegroundColor Green
-    exit 0
+    return
 }
 
 Invoke-Git -Arguments @('tag', '-a', $tagName, $headSha, '-m', "Release $tagName") | Out-Null
