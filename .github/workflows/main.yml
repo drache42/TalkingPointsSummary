@@ -167,7 +167,7 @@ jobs:
           echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
 
       - name: Build and push worker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: infra/Dockerfile
@@ -183,7 +183,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=worker-image
 
       - name: Build and push admin image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: infra/Dockerfile.admin
