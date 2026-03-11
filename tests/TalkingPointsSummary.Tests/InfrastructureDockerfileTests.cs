@@ -1,0 +1,46 @@
+using FluentAssertions;
+
+namespace TalkingPointsSummary.Tests;
+
+public class InfrastructureDockerfileTests
+{
+    [Theory]
+    [InlineData("infra/Dockerfile")]
+    [InlineData("infra/Dockerfile.admin")]
+    public void RuntimeDockerfiles_InstallKerberosGssapiDependency(string relativePath)
+    {
+        var repoRoot = FindRepositoryRoot();
+        var dockerfilePath = Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+
+        File.ReadAllText(dockerfilePath)
+            .Should().Contain("libgssapi-krb5-2");
+    }
+
+    [Fact]
+    public void AdminDockerfile_PublishStepAllowsRestoreAfterFullSourceCopy()
+    {
+        var repoRoot = FindRepositoryRoot();
+        var dockerfilePath = Path.Combine(repoRoot, "infra", "Dockerfile.admin");
+        var dockerfile = File.ReadAllText(dockerfilePath);
+
+        dockerfile.Should().Contain("RUN dotnet publish -c Release -o /app/publish");
+        dockerfile.Should().NotContain("RUN dotnet publish -c Release -o /app/publish --no-restore");
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "TalkingPointsSummary.sln")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate the repository root from the test output directory.");
+    }
+}
