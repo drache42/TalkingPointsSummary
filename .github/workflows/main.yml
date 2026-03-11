@@ -283,7 +283,7 @@ jobs:
       - validate
       - publish-main-images
       - publish-release-tags
-    if: ${{ always() && secrets.DISCORD_WEBHOOK_URL != '' && (needs.validate.result == 'failure' || needs.publish-main-images.result == 'failure' || needs.publish-release-tags.result == 'failure') }}
+    if: ${{ always() && (needs.validate.result == 'failure' || needs.publish-main-images.result == 'failure' || needs.publish-release-tags.result == 'failure') }}
 
     steps:
       - name: Post failure notification
@@ -291,6 +291,11 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
+          if ([string]::IsNullOrWhiteSpace($env:DISCORD_WEBHOOK_URL)) {
+            Write-Host 'DISCORD_WEBHOOK_URL is not set. Skipping notification.'
+            exit 0
+          }
+
           Write-Output "::add-mask::$env:DISCORD_WEBHOOK_URL"
 
           $message = @(
