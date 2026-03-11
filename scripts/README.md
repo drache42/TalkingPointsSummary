@@ -45,7 +45,7 @@ Invalid examples:
 
 ## Script
 
-Use [Publish-ReleaseTag.ps1](d:/Code/TalkingPointsSummary/scripts/Publish-ReleaseTag.ps1) to validate and publish a release tag.
+Use [Publish-ReleaseTag.ps1](./Publish-ReleaseTag.ps1) to validate and publish a release tag.
 
 The script does the following:
 
