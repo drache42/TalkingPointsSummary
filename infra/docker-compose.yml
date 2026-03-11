@@ -26,7 +26,7 @@ services:
       - PipelineSchedule__DayOfWeek=1
       - PipelineSchedule__Hour=8
     volumes:
-      - ${TPS_LOGS_PATH:-../docker-data/logs}:/app/logs
+      - ${TPS_LOGS_PATH:-../runtime-data/logs}:/app/logs
 
   admin:
     build:
@@ -40,7 +40,10 @@ services:
     environment:
       - ConnectionStrings__TalkingPoints=Host=postgres;Database=talkingpoints;Username=postgres;Password=postgres
       - DebugFeatures__Enabled=${DEBUG_FEATURES_ENABLED:-false}
+      - DataProtection__KeysDirectory=/var/app/data-protection-keys
       - WorkerDebugBaseUrl=http://app:8080/
+    volumes:
+      - ${ADMIN_DATA_PROTECTION_KEYS_PATH:-../runtime-data/admin-data-protection-keys}:/var/app/data-protection-keys
     ports:
       - "5100:8080"
 
