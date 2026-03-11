@@ -197,12 +197,20 @@ else {
 $pushResponse = Read-Host 'Create and push this tag? [y/N]'
 if (-not (Test-Yes -Value $pushResponse)) {
     Write-Host 'Cancelled. No tag was created.' -ForegroundColor Yellow
+<<<<<<< HEAD
+=======
+    $global:LASTEXITCODE = 0
+>>>>>>> ad48ff53b96ba688c953c4c37c8cbefe4aafb077
     return
 }
 
 if ($DryRun) {
     Write-Host ''
     Write-Host ("Dry run complete. Tag {0} is valid for commit {1}, and no changes were made." -f $tagName, $headSha) -ForegroundColor Green
+<<<<<<< HEAD
+=======
+    $global:LASTEXITCODE = 0
+>>>>>>> ad48ff53b96ba688c953c4c37c8cbefe4aafb077
     return
 }
 
