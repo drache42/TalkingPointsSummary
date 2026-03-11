@@ -1,0 +1,305 @@
+name: Main Pipeline
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*.*.*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Build and test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('TalkingPointsSummary.sln', 'Directory.Build.props', 'Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore solution
+        run: dotnet restore TalkingPointsSummary.sln
+
+      - name: Build solution
+        run: dotnet build TalkingPointsSummary.sln --configuration Release --no-restore
+
+      - name: Run unit tests
+        id: unit_tests
+        continue-on-error: true
+        run: >-
+          dotnet test tests/TalkingPointsSummary.Tests/TalkingPointsSummary.Tests.csproj
+          --configuration Release
+          --no-build
+          --filter "Category!=Integration"
+          --logger "trx;LogFileName=unit-tests.trx"
+          --results-directory artifacts/test-results/unit
+
+      - name: Run integration tests
+        id: integration_tests
+        continue-on-error: true
+        run: >-
+          dotnet test tests/TalkingPointsSummary.IntegrationTests/TalkingPointsSummary.IntegrationTests.csproj
+          --configuration Release
+          --no-build
+          --filter "Category=Integration"
+          --logger "trx;LogFileName=integration-tests.trx"
+          --results-directory artifacts/test-results/integration
+
+      - name: Publish test summary
+        if: always()
+        shell: pwsh
+        run: |
+          function Get-Count($Counters, [string]$Name) {
+            $value = $Counters.$Name
+            if ([string]::IsNullOrWhiteSpace("$value")) {
+              return 0
+            }
+
+            return [int]$value
+          }
+
+          $trxFiles = Get-ChildItem -Path artifacts/test-results -Filter *.trx -Recurse -ErrorAction SilentlyContinue
+          if (-not $trxFiles) {
+            "## Test Results`n`nNo TRX files were produced." | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+            exit 0
+          }
+
+          $rows = New-Object System.Collections.Generic.List[string]
+          $total = 0
+          $passed = 0
+          $failed = 0
+          $skipped = 0
+
+          foreach ($trxFile in $trxFiles) {
+            [xml]$trx = Get-Content -Path $trxFile.FullName -Raw
+            $counters = $trx.TestRun.ResultSummary.Counters
+
+            $fileTotal = Get-Count $counters total
+            $filePassed = Get-Count $counters passed
+            $fileFailed = (Get-Count $counters failed) + (Get-Count $counters error) + (Get-Count $counters timeout) + (Get-Count $counters aborted)
+            $fileSkipped = (Get-Count $counters notExecuted) + (Get-Count $counters notRunnable) + (Get-Count $counters inconclusive)
+
+            $total += $fileTotal
+            $passed += $filePassed
+            $failed += $fileFailed
+            $skipped += $fileSkipped
+
+            $rows.Add("| $($trxFile.BaseName) | $filePassed | $fileFailed | $fileSkipped | $fileTotal |")
+          }
+
+          @(
+            "## Test Results"
+            ""
+            "| Suite | Passed | Failed | Skipped | Total |"
+            "| --- | ---: | ---: | ---: | ---: |"
+            $rows
+            ""
+            "**Overall:** Passed $passed, Failed $failed, Skipped $skipped, Total $total"
+          ) | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: main-test-results-${{ github.run_id }}
+          path: artifacts/test-results
+          if-no-files-found: warn
+
+      - name: Fail workflow on test errors
+        if: always()
+        shell: pwsh
+        run: |
+          if ('${{ steps.unit_tests.outcome }}' -ne 'success' -or '${{ steps.integration_tests.outcome }}' -ne 'success') {
+            throw 'One or more test suites failed.'
+          }
+
+  publish-main-images:
+    name: Publish branch images
+    runs-on: ubuntu-latest
+    needs:
+      - validate
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image names
+        id: image_names
+        shell: bash
+        run: |
+          repo_lower=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          short_sha="${GITHUB_SHA::7}"
+          echo "worker=ghcr.io/${repo_lower}-worker" >> "$GITHUB_OUTPUT"
+          echo "admin=ghcr.io/${repo_lower}-admin" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.image_names.outputs.worker }}:main
+            ${{ steps.image_names.outputs.worker }}:sha-${{ steps.image_names.outputs.short_sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=TalkingPointsSummary Worker
+          cache-from: type=gha,scope=worker-image
+          cache-to: type=gha,mode=max,scope=worker-image
+
+      - name: Build and push admin image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/Dockerfile.admin
+          push: true
+          tags: |
+            ${{ steps.image_names.outputs.admin }}:main
+            ${{ steps.image_names.outputs.admin }}:sha-${{ steps.image_names.outputs.short_sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=TalkingPointsSummary Admin
+          cache-from: type=gha,scope=admin-image
+          cache-to: type=gha,mode=max,scope=admin-image
+
+  publish-release-tags:
+    name: Promote release tags
+    runs-on: ubuntu-latest
+    needs:
+      - validate
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag commit is on main
+        shell: bash
+        run: |
+          git fetch origin main --depth=1
+          if ! git branch -r --contains "$GITHUB_SHA" | grep -Fq "origin/main"; then
+            echo "Release tags must point at a commit already contained in origin/main."
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute release metadata
+        id: release
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tags must match v<major>.<minor>.<patch>."
+            exit 1
+          fi
+
+          repo_lower=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          short_sha="${GITHUB_SHA::7}"
+          major_minor="$(echo "$version" | cut -d. -f1-2)"
+
+          echo "worker=ghcr.io/${repo_lower}-worker" >> "$GITHUB_OUTPUT"
+          echo "admin=ghcr.io/${repo_lower}-admin" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "major_minor=$major_minor" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Verify source branch images exist
+        shell: bash
+        run: |
+          docker buildx imagetools inspect "${{ steps.release.outputs.worker }}:sha-${{ steps.release.outputs.short_sha }}" > /dev/null
+          docker buildx imagetools inspect "${{ steps.release.outputs.admin }}:sha-${{ steps.release.outputs.short_sha }}" > /dev/null
+
+      - name: Promote worker image to release tags
+        shell: bash
+        run: |
+          docker buildx imagetools create \
+            --tag "${{ steps.release.outputs.worker }}:${{ steps.release.outputs.version }}" \
+            --tag "${{ steps.release.outputs.worker }}:${{ steps.release.outputs.major_minor }}" \
+            --tag "${{ steps.release.outputs.worker }}:latest" \
+            "${{ steps.release.outputs.worker }}:sha-${{ steps.release.outputs.short_sha }}"
+
+      - name: Promote admin image to release tags
+        shell: bash
+        run: |
+          docker buildx imagetools create \
+            --tag "${{ steps.release.outputs.admin }}:${{ steps.release.outputs.version }}" \
+            --tag "${{ steps.release.outputs.admin }}:${{ steps.release.outputs.major_minor }}" \
+            --tag "${{ steps.release.outputs.admin }}:latest" \
+            "${{ steps.release.outputs.admin }}:sha-${{ steps.release.outputs.short_sha }}"
+
+  notify-discord:
+    name: Notify Discord on failures
+    runs-on: ubuntu-latest
+    needs:
+      - validate
+      - publish-main-images
+      - publish-release-tags
+    if: ${{ always() && secrets.DISCORD_WEBHOOK_URL != '' && (needs.validate.result == 'failure' || needs.publish-main-images.result == 'failure' || needs.publish-release-tags.result == 'failure') }}
+
+    steps:
+      - name: Post failure notification
+        shell: pwsh
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          Write-Output "::add-mask::$env:DISCORD_WEBHOOK_URL"
+
+          $message = @(
+            "Main pipeline failed."
+            "Repository: ${{ github.repository }}"
+            "Ref: ${{ github.ref_name }}"
+            "Event: ${{ github.event_name }}"
+            "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          ) -join "`n"
+
+          $payload = @{ content = $message } | ConvertTo-Json -Compress
+          Invoke-RestMethod -Method Post -Uri $env:DISCORD_WEBHOOK_URL -ContentType 'application/json' -Body $payload | Out-Null
