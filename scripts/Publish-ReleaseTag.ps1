@@ -200,13 +200,15 @@ else {
 $pushResponse = Read-Host 'Create and push this tag? [y/N]'
 if (-not (Test-Yes -Value $pushResponse)) {
     Write-Host 'Cancelled. No tag was created.' -ForegroundColor Yellow
-    exit 0
+    $global:LASTEXITCODE = 0
+    return
 }
 
 if ($DryRun) {
     Write-Host ''
     Write-Host ("Dry run complete. Tag {0} is valid for commit {1}, and no changes were made." -f $tagName, $headSha) -ForegroundColor Green
-    exit 0
+    $global:LASTEXITCODE = 0
+    return
 }
 
 Invoke-Git -Arguments @('tag', '-a', $tagName, $headSha, '-m', "Release $tagName") | Out-Null
