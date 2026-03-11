@@ -4,6 +4,8 @@ WORKDIR /src
 # Copy csproj files and restore
 COPY src/TalkingPointsSummary.Core/TalkingPointsSummary.Core.csproj src/TalkingPointsSummary.Core/
 COPY src/TalkingPointsSummary.Admin/TalkingPointsSummary.Admin.csproj src/TalkingPointsSummary.Admin/
+COPY Directory.Build.props ./
+COPY Directory.Packages.props ./
 RUN dotnet restore src/TalkingPointsSummary.Admin/TalkingPointsSummary.Admin.csproj
 
 # Copy everything and publish

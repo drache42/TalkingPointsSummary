@@ -4,6 +4,8 @@ WORKDIR /src
 # Copy csproj and restore
 COPY src/TalkingPointsSummary.Core/TalkingPointsSummary.Core.csproj src/TalkingPointsSummary.Core/
 COPY src/TalkingPointsSummary/TalkingPointsSummary.csproj src/TalkingPointsSummary/
+COPY Directory.Build.props ./
+COPY Directory.Packages.props ./
 RUN dotnet restore src/TalkingPointsSummary/TalkingPointsSummary.csproj
 
 # Copy everything and build
