@@ -73,6 +73,7 @@ public class WeeklyPipelineService : BackgroundService
     private readonly TimeProvider _timeProvider;
     private readonly SemaphoreSlim _runLock = new(1, 1);
     private int _isRunInProgress;
+    private readonly TimeZoneInfo _scheduleTimeZone;
     private const string ScheduleTrigger = "schedule";
 
     /// <summary>
@@ -92,6 +93,7 @@ public class WeeklyPipelineService : BackgroundService
         _schedule = schedule.Value;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _scheduleTimeZone = TimeZoneInfo.FindSystemTimeZoneById(schedule.Value.TimeZone);
     }
 
     /// <summary>
@@ -101,9 +103,10 @@ public class WeeklyPipelineService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation(
-            "Weekly pipeline service started. Schedule: {Day} at {Hour}:00",
+            "Weekly pipeline service started. Schedule: {Day} at {Hour}:00 ({TimeZone})",
             (DayOfWeek)_schedule.DayOfWeek,
-            _schedule.Hour);
+            _schedule.Hour,
+            _scheduleTimeZone.Id);
 
         var scheduledWindowStartUtc = GetNextScheduledWindowStartUtc(_timeProvider.GetUtcDateTime());
         var nextWakeUpUtc = GetInitialWakeUpUtc(_timeProvider.GetUtcDateTime(), scheduledWindowStartUtc);
@@ -160,10 +163,11 @@ public class WeeklyPipelineService : BackgroundService
 
     internal bool ShouldRun(DateTime now)
     {
-        if ((int)now.DayOfWeek != _schedule.DayOfWeek)
+        var local = TimeZoneInfo.ConvertTimeFromUtc(now, _scheduleTimeZone);
+        if ((int)local.DayOfWeek != _schedule.DayOfWeek)
             return false;
 
-        if (now.Hour != _schedule.Hour)
+        if (local.Hour != _schedule.Hour)
             return false;
 
         return true;
@@ -181,23 +185,25 @@ public class WeeklyPipelineService : BackgroundService
             return GetScheduledWindowStartUtc(now);
         }
 
-        var daysUntilScheduled = (_schedule.DayOfWeek - (int)now.DayOfWeek + 7) % 7;
-        var candidateDate = now.Date.AddDays(daysUntilScheduled);
-        var candidate = new DateTime(
-            candidateDate.Year,
-            candidateDate.Month,
-            candidateDate.Day,
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(now, _scheduleTimeZone);
+        var daysUntilScheduled = (_schedule.DayOfWeek - (int)localNow.DayOfWeek + 7) % 7;
+        var candidateLocalDate = localNow.Date.AddDays(daysUntilScheduled);
+        var candidateLocal = new DateTime(
+            candidateLocalDate.Year,
+            candidateLocalDate.Month,
+            candidateLocalDate.Day,
             _schedule.Hour,
             0,
             0,
-            DateTimeKind.Utc);
+            DateTimeKind.Unspecified);
+        var candidateUtc = TimeZoneInfo.ConvertTimeToUtc(candidateLocal, _scheduleTimeZone);
 
-        if (candidate <= now)
+        if (candidateUtc <= now)
         {
-            candidate = candidate.AddDays(7);
+            candidateUtc = TimeZoneInfo.ConvertTimeToUtc(candidateLocal.AddDays(7), _scheduleTimeZone);
         }
 
-        return candidate;
+        return candidateUtc;
     }
 
     /// <summary>
@@ -217,7 +223,11 @@ public class WeeklyPipelineService : BackgroundService
         => scheduledWindowStartUtc > now ? scheduledWindowStartUtc : now;
 
     private DateTime GetScheduledWindowStartUtc(DateTime now)
-        => new(now.Year, now.Month, now.Day, _schedule.Hour, 0, 0, DateTimeKind.Utc);
+    {
+        var local = TimeZoneInfo.ConvertTimeFromUtc(now, _scheduleTimeZone);
+        var windowStartLocal = new DateTime(local.Year, local.Month, local.Day, _schedule.Hour, 0, 0, DateTimeKind.Unspecified);
+        return TimeZoneInfo.ConvertTimeToUtc(windowStartLocal, _scheduleTimeZone);
+    }
 
     internal Task<PipelineRunStatus> TryRunScheduledPipelineAsync(DateTime now, CancellationToken ct = default)
         => TryRunPipelineAsync(ScheduleTrigger, parentId: null, scheduledDate: now.Date, ct);
