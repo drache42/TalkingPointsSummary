@@ -91,6 +91,8 @@ This rule applies to ALL responses, including technical details, code behavior, 
 | Skill file | Trigger topics |
 |---|---|
 | `.github/skills/postgres-database-access/SKILL.md` | postgres, database, SQL, query, table, DbContext, migration, connection string |
+| `.github/skills/create-pull-request/SKILL.md` | pull request, PR, open PR, create PR, draft PR, git diff, branch comparison |
+| `.github/skills/semver-classification/SKILL.md` | semver, semantic version, version bump, major, minor, patch, classify changes |
 
 ### When to Check Skills
 

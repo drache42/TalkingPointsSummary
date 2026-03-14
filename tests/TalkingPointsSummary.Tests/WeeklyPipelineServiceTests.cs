@@ -109,6 +109,42 @@ public class WeeklyPipelineServiceTests : IDisposable
     }
 
     [Theory]
+    [InlineData(DayOfWeek.Monday, 13, 1, 8, "America/New_York", true)]   // Mon 13:00 UTC = Mon 08:00 EST → run
+    [InlineData(DayOfWeek.Monday, 12, 1, 8, "America/New_York", false)]  // Mon 12:00 UTC = Mon 07:00 EST → wrong hour
+    [InlineData(DayOfWeek.Tuesday, 13, 1, 8, "America/New_York", false)] // Tue 13:00 UTC = Tue 08:00 EST → wrong day
+    public void ShouldRun_RespectsTimezone(DayOfWeek dayOfWeek, int hourUtc, int scheduledDay, int scheduledHour, string timezone, bool expected)
+    {
+        _settings.DayOfWeek = scheduledDay;
+        _settings.Hour = scheduledHour;
+        _settings.TimeZone = timezone;
+        var service = CreateService();
+
+        var baseDate = new DateTime(2026, 3, 2, hourUtc, 0, 0, DateTimeKind.Utc); // March 2, 2026 is Monday
+        while (baseDate.DayOfWeek != dayOfWeek)
+        {
+            baseDate = baseDate.AddDays(1);
+        }
+        baseDate = new DateTime(baseDate.Year, baseDate.Month, baseDate.Day, hourUtc, 0, 0, DateTimeKind.Utc);
+
+        service.ShouldRun(baseDate).Should().Be(expected);
+    }
+
+    [Theory]
+    // Sunday before Monday 8am EST (UTC-5 in winter) → Mon 13:00 UTC
+    [InlineData("2026-03-01T10:00:00Z", "2026-03-02T13:00:00Z")]
+    // After Monday 8am EST, same week → next Monday is 2026-03-09 (EDT = UTC-4 after spring-forward on Mar 8) → Mon 12:00 UTC
+    [InlineData("2026-03-02T14:30:00Z", "2026-03-09T12:00:00Z")]
+    public void GetNextScheduledWindowStartUtc_RespectsTimezone(string nowIso, string expectedIso)
+    {
+        _settings.TimeZone = "America/New_York";
+        var service = CreateService();
+
+        var nextScheduledUtc = service.GetNextScheduledWindowStartUtc(DateTime.Parse(nowIso, null, System.Globalization.DateTimeStyles.RoundtripKind));
+
+        nextScheduledUtc.Should().Be(DateTime.Parse(expectedIso, null, System.Globalization.DateTimeStyles.RoundtripKind));
+    }
+
+    [Theory]
     [InlineData("2026-03-02T08:15:00Z", "2026-03-02T08:00:00Z", "2026-03-02T08:16:00Z")]
     [InlineData("2026-03-02T08:59:30Z", "2026-03-02T08:00:00Z", "2026-03-09T08:00:00Z")]
     public void GetRetryWakeUpUtc_RetriesWithinWindowOrAdvancesNextWeek(string nowIso, string scheduledStartIso, string expectedIso)

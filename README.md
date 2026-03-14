@@ -176,10 +176,11 @@ The worker loads configuration in this order:
 | `Smtp:Host` | `Smtp__Host` | `smtp.gmail.com` in base config, `localhost` in Development | Yes | SMTP hostname |
 | `Smtp:Port` | `Smtp__Port` | `587` in base config, `1025` in Development | Yes | SMTP port |
 | `Smtp:Username` | `Smtp__Username` | empty | No | Must be paired with `Smtp:Password` |
-| `Smtp:Password` | `Smtp__Password` | empty | No | Must be paired with `Smtp:Username` |
+| `Smtp:Password` | `Smtp__Password` | empty | No | Must be paired with `Smtp:Username`; for Gmail, use an App Password — see [docs/gmail-smtp.md](docs/gmail-smtp.md) |
 | `Smtp:FromEmail` | `Smtp__FromEmail` | empty in base config, `dev@example.com` in Development | Yes | Sender address |
-| `PipelineSchedule:DayOfWeek` | `PipelineSchedule__DayOfWeek` | `1` | No | Weekly schedule day in UTC, where `0=Sunday` and `1=Monday` |
-| `PipelineSchedule:Hour` | `PipelineSchedule__Hour` | `8` | No | Weekly schedule hour in UTC |
+| `PipelineSchedule:DayOfWeek` | `PipelineSchedule__DayOfWeek` | `1` | No | Weekly schedule day, where `0=Sunday` and `1=Monday`. Interpreted in `PipelineSchedule:TimeZone` when set, otherwise UTC. |
+| `PipelineSchedule:Hour` | `PipelineSchedule__Hour` | `8` | No | Weekly schedule hour in 24-hour time. Interpreted in `PipelineSchedule:TimeZone` when set, otherwise UTC. |
+| `PipelineSchedule:TimeZone` | `PipelineSchedule__TimeZone` | `UTC` | No | Timezone for the schedule. Accepts IANA (`America/New_York`) or Windows (`Eastern Standard Time`) format. |
 
 ### Admin settings
 
@@ -204,7 +205,7 @@ The AppHost has its own configuration in `src/TalkingPointsSummary.AppHost/appse
 
 ## How the pipeline works
 
-1. The scheduler waits for the next configured UTC day and hour and runs immediately if the worker starts during that scheduled hour. If the scheduled evaluation is blocked by another active run or throws an error, it waits one minute and re-evaluates within that same scheduled hour; otherwise it advances to the next weekly occurrence. The default schedule is Monday at 08:00 UTC.
+1. The scheduler waits for the next configured day and hour (interpreted in `PipelineSchedule:TimeZone` when set, otherwise UTC) and runs immediately if the worker starts during that scheduled hour. If the scheduled evaluation is blocked by another active run or throws an error, it waits one minute and re-evaluates within that same scheduled hour; otherwise it advances to the next weekly occurrence. The default schedule is Monday at 08:00 UTC.
 2. For each active parent, the worker fetches TalkingPoints feed pages of 20 messages each.
 3. Fetching stops when it reaches the newest stored message ID, when it sees a message older than the newest stored timestamp, when a short or empty page is returned, or when `TalkingPointsApi:MaxPagesPerRun` is reached.
 4. The deduplicator stores only messages whose `(ParentId, ExternalMessageId)` pair does not already exist in the database.

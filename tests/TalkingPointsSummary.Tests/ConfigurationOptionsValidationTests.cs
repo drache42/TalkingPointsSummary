@@ -124,6 +124,30 @@ public class ConfigurationOptionsValidationTests
             .WithMessage("*Smtp:Username and Smtp:Password*");
     }
 
+    [Fact]
+    public void EnsureValidatedOptions_InvalidTimezone_Throws()
+    {
+        using var provider = BuildServiceProvider(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:TalkingPoints"] = "Host=localhost;Database=talkingpoints;Username=postgres;Password=postgres",
+            ["Anthropic:ApiKey"] = "test-key",
+            ["Browserless:BaseUrl"] = "http://localhost:3000",
+            ["NewsletterScrapingSecurity:Enabled"] = "true",
+            ["TalkingPointsApi:MaxPagesPerRun"] = "3",
+            ["Smtp:Host"] = "localhost",
+            ["Smtp:Port"] = "1025",
+            ["Smtp:FromEmail"] = "dev@example.com",
+            ["PipelineSchedule:DayOfWeek"] = "1",
+            ["PipelineSchedule:Hour"] = "8",
+            ["PipelineSchedule:TimeZone"] = "Not/ATimeZone",
+        });
+
+        var act = () => WorkerConfiguration.EnsureValidatedOptions(provider);
+
+        act.Should().Throw<OptionsValidationException>()
+            .WithMessage("*PipelineSchedule:TimeZone*");
+    }
+
     private static ServiceProvider BuildServiceProvider(Dictionary<string, string?> values)
     {
         var configuration = new ConfigurationBuilder()
