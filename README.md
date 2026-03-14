@@ -176,7 +176,7 @@ The worker loads configuration in this order:
 | `Smtp:Host` | `Smtp__Host` | `smtp.gmail.com` in base config, `localhost` in Development | Yes | SMTP hostname |
 | `Smtp:Port` | `Smtp__Port` | `587` in base config, `1025` in Development | Yes | SMTP port |
 | `Smtp:Username` | `Smtp__Username` | empty | No | Must be paired with `Smtp:Password` |
-| `Smtp:Password` | `Smtp__Password` | empty | No | Must be paired with `Smtp:Username` |
+| `Smtp:Password` | `Smtp__Password` | empty | No | Must be paired with `Smtp:Username`; for Gmail, use an App Password — see [docs/gmail-smtp.md](docs/gmail-smtp.md) |
 | `Smtp:FromEmail` | `Smtp__FromEmail` | empty in base config, `dev@example.com` in Development | Yes | Sender address |
 | `PipelineSchedule:DayOfWeek` | `PipelineSchedule__DayOfWeek` | `1` | No | Weekly schedule day in UTC, where `0=Sunday` and `1=Monday` |
 | `PipelineSchedule:Hour` | `PipelineSchedule__Hour` | `8` | No | Weekly schedule hour in UTC |
