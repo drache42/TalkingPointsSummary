@@ -75,7 +75,10 @@ internal static class WorkerConfiguration
                 builder.AddRetry(SharedRetryOptions);
             });
 
-        services.AddHttpClient<ISummaryGenerator, SummaryGenerator>()
+        services.AddHttpClient<ISummaryGenerator, SummaryGenerator>(client =>
+            {
+                client.Timeout = TimeSpan.FromMinutes(5);
+            })
             .AddResilienceHandler("anthropic-summary-retry", static builder =>
             {
                 builder.AddRetry(SharedRetryOptions);
