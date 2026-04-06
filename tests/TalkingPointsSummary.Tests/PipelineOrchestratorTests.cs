@@ -346,7 +346,7 @@ public class PipelineOrchestratorTests : IDisposable
 
         _mockEmailSender.Verify(x => x.SendAsync(
             "test@example.com",
-            "Talking Points Summary V2",
+            "Talking Points Summary",
             "<h1>Weekly Summary</h1><p>Content here</p>",
             It.IsAny<CancellationToken>()), Times.Once);
 
