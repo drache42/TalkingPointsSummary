@@ -107,7 +107,7 @@ public class PipelineEndToEndTests : IAsyncLifetime
         mailCount.Should().Be(1);
 
         var mailMessages = await _fixture.GetMailpitMessagesAsync();
-        mailMessages[0].Subject.Should().Be("Talking Points Summary V2");
+        mailMessages[0].Subject.Should().Be("Talking Points Summary");
         mailMessages[0].To.Should().Contain("test@example.com");
 
         var htmlBody = await _fixture.GetMailpitMessageHtmlAsync(mailMessages[0].Id);

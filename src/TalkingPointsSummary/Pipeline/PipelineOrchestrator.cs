@@ -120,7 +120,7 @@ public class PipelineOrchestrator
             // Step 7: Send email
             await _emailSender.SendAsync(
                 parent.EmailRecipients,
-                "Talking Points Summary V2",
+                "Talking Points Summary",
                 html,
                 ct);
 
