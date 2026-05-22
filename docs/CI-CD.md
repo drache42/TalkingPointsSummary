@@ -1,6 +1,6 @@
 # CI/CD
 
-This repository uses GitHub Actions for pull request validation, main-branch publishing, release tag promotion, and Dependabot automation.
+This repository uses GitHub Actions for pull request validation, main-branch publishing, and Dependabot automation.
 
 ## Workflows
 
@@ -65,22 +65,6 @@ Additional tags published when `auto-release` runs:
 - `<major>.<minor>.<patch>`
 - `<major>.<minor>`
 - `latest`
-
-### Release tag promotion
-
-The same main pipeline also handles stable releases.
-
-- Trigger: pushing a git tag that matches `v<major>.<minor>.<patch>`
-- Guardrail: the tagged commit must already be contained in `origin/main`
-- Behavior: the workflow promotes the already-published `sha-<shortsha>` images to stable release tags instead of rebuilding them
-
-Published stable tags:
-
-- `<major>.<minor>.<patch>`
-- `<major>.<minor>`
-- `latest`
-
-This keeps semver human-controlled while preserving an exact link between the stable release tag and the image built from the main-branch commit.
 
 ### Dependabot
 
@@ -157,7 +141,7 @@ This is the recommended primary workflow for testing CI changes.
 
 `main.yml` includes `workflow_dispatch`, so once that workflow file exists on the default branch you can manually run it from the Actions tab and pick a branch.
 
-This is useful for testing the validation portion of `main.yml` on a feature branch. Manual runs do not publish images because the publish jobs are gated to real `push` events for `main` and release tags.
+This is useful for testing the validation portion of `main.yml` on a feature branch. Manual runs do not publish images because the publish jobs are gated to real `push` events for `main`.
 
 ### Local execution with `act`
 

@@ -218,6 +218,8 @@ jobs:
             exit 0
           fi
 
+          echo "::add-mask::$DISCORD_WEBHOOK_URL"
+
           PAYLOAD=$(jq -n \
             --arg title "$PR_TITLE" \
             --arg url "$PR_URL" \
