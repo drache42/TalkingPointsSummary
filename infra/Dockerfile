@@ -1,4 +1,6 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG VERSION=0.0.0
+ARG COMMIT_SHA=unknown
 WORKDIR /src
 
 # Copy csproj and restore
@@ -11,7 +13,9 @@ RUN dotnet restore src/TalkingPointsSummary/TalkingPointsSummary.csproj
 # Copy everything and build
 COPY . .
 WORKDIR /src/src/TalkingPointsSummary
-RUN dotnet publish -c Release -o /app/publish --no-restore
+RUN dotnet publish -c Release -o /app/publish --no-restore \
+    /p:Version=$VERSION \
+    "/p:InformationalVersion=${VERSION}+sha.${COMMIT_SHA}"
 
 # Runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
