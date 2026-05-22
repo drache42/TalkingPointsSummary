@@ -130,8 +130,14 @@ Enable these repository settings:
 
 | Secret | Required | Purpose |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | Yes | Enables `classify-pr.yml` to call Claude 3.5 Haiku for automatic PR classification. Without this, classification fails and `semver: unknown` is applied. |
-| `DISCORD_WEBHOOK_URL` | No | Discord webhook URL for pipeline failure notifications. |
+| `ANTHROPIC_API_KEY` | Yes | Enables `classify-pr.yml` to call the Anthropic API for automatic PR classification. Without this, classification fails and `semver: unknown` is applied. |
+| `DISCORD_WEBHOOK_URL` | No | Discord webhook URL for pipeline failure, release, and Dependabot breaking-change notifications. |
+
+### Repository variables
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `ANTHROPIC_MODEL` | Yes | The Anthropic model ID used by `classify-pr.yml` (e.g. `claude-haiku-4-5`). Update this variable to switch models without modifying workflow files. |
 
 No separate registry secret is required for `ghcr.io` publishing. The workflows use `GITHUB_TOKEN` with `packages: write` permission.
 

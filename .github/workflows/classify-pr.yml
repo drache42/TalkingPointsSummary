@@ -56,12 +56,19 @@ jobs:
         if: ${{ github.event.pull_request.head.repo.fork == false }}
         shell: bash
         run: |
+          # Fetch complete file list with per-file stats (never truncated)
+          gh api \
+            --paginate \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --jq '.[] | "\(.status)\t\(.filename)\t+\(.additions)/-\(.deletions)"' \
+            > /tmp/pr_files.txt 2>/dev/null || true
+
+          # Fetch full diff and truncate to ~100 KB for diff content
           gh api \
             -H "Accept: application/vnd.github.diff" \
             "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" \
             > /tmp/pr.diff 2>/dev/null || true
-          # Truncate to ~16 KB to stay within model token limits
-          head -c 16384 /tmp/pr.diff > /tmp/pr_truncated.diff
+          head -c 102400 /tmp/pr.diff > /tmp/pr_truncated.diff
 
       - name: Classify with Claude
         if: ${{ github.event.pull_request.head.repo.fork == false }}
@@ -69,20 +76,24 @@ jobs:
         shell: bash
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
+          FILES=$(cat /tmp/pr_files.txt 2>/dev/null || echo "")
           DIFF=$(cat /tmp/pr_truncated.diff 2>/dev/null || echo "")
 
           PAYLOAD=$(jq -n \
             --arg title "$PR_TITLE" \
+            --arg files "$FILES" \
             --arg diff "$DIFF" \
+            --arg model "$ANTHROPIC_MODEL" \
             '{
-              model: "claude-3-5-haiku-20241022",
+              model: $model,
               max_tokens: 256,
-              system: "You are a semantic versioning expert for the TalkingPointsSummary application. Classify a PR diff as major, minor, or patch.\n\nRules (apply the HIGHEST matching tier):\n\nMAJOR (breaking change): EF Core migration with DROP TABLE/DROP COLUMN/TRUNCATE/destructive ALTER COLUMN; config key removed or renamed in appsettings.json or option classes; CLI command removed or renamed; commit message contains \"BREAKING CHANGE:\"\n\nMINOR (new backward-compatible feature): new service or class added to Services/ or Pipeline/; new EF Core migration that only adds tables or columns; new config option with safe default; new admin UI page or Blazor component; new CLI command; new AI prompt file in Prompts/\n\nPATCH (default): bug fixes; changes only in tests/ docs/ or *.md files; CI/infra/build changes (.github/ infra/); refactors with no behavioral change; dependency version bumps; logging improvements\n\nRespond with valid JSON only, no other text: {\"classification\": \"major\"|\"minor\"|\"patch\", \"rationale\": \"one sentence explaining the primary signal\"}",
+              system: "You are a semantic versioning expert for the TalkingPointsSummary application. Apply standard semver principles adapted for a deployed application: major = breaking deployment (destructive DB schema changes, config key renames/removals, CLI command removals); minor = new backward-compatible capability; patch = everything else. The changed-files list is always complete; the diff content may be truncated on very large PRs.\n\nProject-specific rules (apply the HIGHEST matching tier):\n\nMAJOR (breaking change): EF Core migration with DROP TABLE/DROP COLUMN/TRUNCATE/destructive ALTER COLUMN; config key removed or renamed in appsettings.json or option classes; CLI command removed or renamed; commit message contains \"BREAKING CHANGE:\"\n\nMINOR (new backward-compatible feature): new service or class added to Services/ or Pipeline/; new EF Core migration that only adds tables or columns; new config option with safe default; new admin UI page or Blazor component; new CLI command; new AI prompt file in Prompts/\n\nPATCH (default): bug fixes; changes only in tests/ docs/ or *.md files; CI/infra/build changes (.github/ infra/); refactors with no behavioral change; dependency version bumps; logging improvements\n\nRespond with valid JSON only, no other text: {\"classification\": \"major\"|\"minor\"|\"patch\", \"rationale\": \"one sentence explaining the primary signal\"}",
               messages: [{
                 role: "user",
-                content: ("PR Title: " + $title + "\n\nDiff:\n" + $diff)
+                content: ("PR Title: " + $title + "\n\nChanged files (complete):\n" + $files + "\n\nDiff (may be truncated):\n" + $diff)
               }]
             }')
 
