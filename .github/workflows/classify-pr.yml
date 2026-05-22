@@ -190,3 +190,28 @@ jobs:
                 body,
               });
             }
+
+      - name: Notify Discord on Dependabot major classification
+        if: >-
+          ${{ github.event.pull_request.head.repo.fork == false &&
+              github.actor == 'dependabot[bot]' &&
+              steps.classify.outputs.classification == 'major' }}
+        shell: bash
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_WEBHOOK_URL not set. Skipping."
+            exit 0
+          fi
+
+          PAYLOAD=$(jq -n \
+            --arg title "$PR_TITLE" \
+            --arg url "$PR_URL" \
+            '{content: ("⚠️ **Dependabot breaking-change detected** — manual review required before merging.\n\nPR: " + $title + "\n" + $url)}')
+
+          curl -s -X POST "$DISCORD_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD"

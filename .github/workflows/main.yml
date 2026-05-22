@@ -383,6 +383,28 @@ jobs:
             --tag "${{ steps.image_names.outputs.admin }}:latest" \
             "${{ steps.image_names.outputs.admin }}:sha-${{ steps.image_names.outputs.short_sha }}"
 
+      - name: Notify Discord on release
+        shell: pwsh
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          VERSION: ${{ needs.compute-version.outputs.version }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:DISCORD_WEBHOOK_URL)) {
+            Write-Host 'DISCORD_WEBHOOK_URL is not set. Skipping notification.'
+            exit 0
+          }
+
+          Write-Output "::add-mask::$env:DISCORD_WEBHOOK_URL"
+
+          $message = @(
+            "🚀 Released v$($env:VERSION)"
+            "Repository: ${{ github.repository }}"
+            "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          ) -join "`n"
+
+          $payload = @{ content = $message } | ConvertTo-Json -Compress
+          Invoke-RestMethod -Method Post -Uri $env:DISCORD_WEBHOOK_URL -ContentType 'application/json' -Body $payload | Out-Null
+
   publish-release-tags:
     name: Promote release tags
     runs-on: ubuntu-latest
