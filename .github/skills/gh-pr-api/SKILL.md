@@ -359,13 +359,13 @@ $commentId = $thread.comments.nodes[0].databaseId   # e.g. 2145967
 
 ### Posting a Reply Before Resolving
 
-To reply to a thread before resolving it, use the REST API replies endpoint:
+To reply to a thread before resolving it, use the REST API. **Note:** The `/pulls/comments/{id}/replies` endpoint returns HTTP 404 even when the comment is accessible. Use `/pulls/{prNumber}/comments` with `in_reply_to` instead:
 
 ```powershell
-# Post a reply using the replies endpoint (only body required)
-gh api "repos/$owner/$repo/pulls/comments/$commentId/replies" `
-  --method POST `
-  -f body="🤖 PR Navigator: took suggested fix"
+# Post a reply using in_reply_to (the /replies endpoint returns 404)
+gh api --method POST "repos/$owner/$repo/pulls/$prNumber/comments" `
+  --field body="🤖 PR Navigator: took suggested fix" `
+  --field in_reply_to=$commentId
 ```
 
 Then resolve the thread using the GraphQL mutation shown above.

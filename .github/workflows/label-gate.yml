@@ -2,7 +2,7 @@ name: Label Gate
 
 on:
   pull_request:
-    types: [opened, labeled, unlabeled, reopened]
+    types: [opened, synchronize, labeled, unlabeled, reopened]
 
 permissions:
   pull-requests: read
@@ -32,11 +32,11 @@ jobs:
               core.setFailed(
                 `PR has multiple semver labels (${semverFound.join(', ')}). Remove all but one.`
               );
-            } else if (semverFound.length === 0 && !hasSkipRelease) {
+            } else if (semverFound.length === 0) {
               core.setFailed(
-                'PR must have exactly one of: semver: major, semver: minor, semver: patch, or skip-release.'
+                'PR must have exactly one semver label: semver: major, semver: minor, or semver: patch. skip-release may be added alongside but does not replace a semver label.'
               );
             } else {
-              const active = [...semverFound, ...(hasSkipRelease ? ['skip-release'] : [])];
-              core.info(`PR labels OK: ${active.join(' + ')}`);
+              const active = [...semverFound, ...(hasSkipRelease ? ['+ skip-release'] : [])];
+              core.info(`PR labels OK: ${active.join(' ')}`);
             }

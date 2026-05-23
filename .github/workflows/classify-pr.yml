@@ -70,7 +70,7 @@ jobs:
             > /tmp/pr.diff 2>/dev/null || true
           head -c 102400 /tmp/pr.diff > /tmp/pr_truncated.diff
 
-      - name: Classify with Claude
+      - name: Classify with Anthropic
         if: ${{ github.event.pull_request.head.repo.fork == false }}
         id: classify
         shell: bash
