@@ -20,15 +20,14 @@ jobs:
       GH_TOKEN: ${{ github.token }}
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
       - name: Post fork notice
         if: ${{ github.event.pull_request.head.repo.fork == true }}
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: .github/scripts/post-fork-notice.ps1
-
-      - name: Checkout
-        if: ${{ github.event.pull_request.head.repo.fork == false }}
-        uses: actions/checkout@v6
 
       - name: Fetch PR diff
         if: ${{ github.event.pull_request.head.repo.fork == false }}
