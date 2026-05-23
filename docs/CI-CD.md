@@ -32,7 +32,7 @@ The label gate is defined in `.github/workflows/label-gate.yml` and is configure
 The classification workflow is defined in `.github/workflows/classify-pr.yml`.
 
 - Trigger: every pull request opened or synchronized against `main` (uses `pull_request_target` so it has access to secrets)
-- Behavior: fetches the PR diff via the GitHub API, calls the Anthropic model configured in the `ANTHROPIC_MODEL` repository variable to classify the change as `major`, `minor`, or `patch`, removes any stale `semver:` label, applies the new label, and posts or updates a bot comment with the classification and rationale
+- Behavior: fetches the PR diff via the GitHub API, calls Claude 3.5 Haiku to classify the change as `major`, `minor`, or `patch`, removes any stale `semver:` label, applies the new label, and posts or updates a bot comment with the classification and rationale
 - Fork PRs: classification is skipped; a comment is posted instructing the maintainer to label manually
 - API failure: `semver: unknown` is applied and the label gate blocks merge until a human resolves it
 

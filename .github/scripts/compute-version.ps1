@@ -19,7 +19,7 @@ if (-not $latestTag) {
 Write-Host "Current version: $major.$minor.$patch (tagged at $taggedAt)"
 $shortSha = $env:GITHUB_SHA.Substring(0, 7)
 
-$allPRs    = gh api "repos/$env:GITHUB_REPOSITORY/pulls?state=closed&base=main&per_page=100" | ConvertFrom-Json
+$allPRs    = gh api --paginate "repos/$env:GITHUB_REPOSITORY/pulls?state=closed&base=main&per_page=100" | ConvertFrom-Json
 $mergedPRs = @($allPRs | Where-Object { $_.merged_at -ne $null -and $_.merged_at -gt $taggedAt })
 
 $prCount = $mergedPRs.Count

@@ -229,18 +229,12 @@ jobs:
         env:
           VERSION: ${{ needs.compute-version.outputs.version }}
         run: |
-          git tag -a "v$env:VERSION" HEAD -m "Release v$env:VERSION"
-          git push origin "v$env:VERSION"
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.compute-version.outputs.version }}
-        run: |
-          gh release create "v$env:VERSION" `
-            --title "v$env:VERSION" `
-            --generate-notes `
-            --latest
+          if (git tag -l "v$env:VERSION") {
+            Write-Host "Tag v$env:VERSION already exists - skipping tag creation."
+          } else {
+            git tag -a "v$env:VERSION" HEAD -m "Release v$env:VERSION"
+            git push origin "v$env:VERSION"
+          }
 
       - name: Compute image names
         id: image_names
@@ -292,6 +286,16 @@ jobs:
             --tag "$image`:$env:MAJOR_MINOR" `
             --tag "$image`:latest" `
             "$image`:sha-$env:SHORT_SHA"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.compute-version.outputs.version }}
+        run: |
+          gh release create "v$env:VERSION" `
+            --title "v$env:VERSION" `
+            --generate-notes `
+            --latest
 
       - name: Notify Discord on release
         env:
