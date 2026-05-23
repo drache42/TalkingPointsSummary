@@ -19,8 +19,8 @@ if (-not $latestTag) {
 Write-Host "Current version: $major.$minor.$patch (tagged at $taggedAt)"
 $shortSha = $env:GITHUB_SHA.Substring(0, 7)
 
-$allPRs    = gh api --paginate "repos/$env:GITHUB_REPOSITORY/pulls?state=closed&base=main&per_page=100" | ConvertFrom-Json
-$mergedPRs = @($allPRs | Where-Object { $_.merged_at -ne $null -and $_.merged_at -gt $taggedAt })
+$allPRs    = gh pr list --repo $env:GITHUB_REPOSITORY --state merged --base main --limit 1000 --json number,labels,mergedAt | ConvertFrom-Json
+$mergedPRs = @($allPRs | Where-Object { $_.mergedAt -ne $null -and $_.mergedAt -gt $taggedAt })
 
 $prCount = $mergedPRs.Count
 Write-Host "PRs merged since last tag: $prCount"
@@ -33,7 +33,7 @@ if ($prCount -eq 0) {
     exit 0
 }
 
-$triggerPR      = $mergedPRs | Sort-Object merged_at | Select-Object -Last 1
+$triggerPR      = $mergedPRs | Sort-Object mergedAt | Select-Object -Last 1
 $triggerHasSkip = $triggerPR.labels | Where-Object { $_.name -eq 'skip-release' }
 
 if ($triggerHasSkip) {

@@ -292,10 +292,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.compute-version.outputs.version }}
         run: |
-          gh release create "v$env:VERSION" `
-            --title "v$env:VERSION" `
-            --generate-notes `
-            --latest
+          gh release view "v$env:VERSION" *>$null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release v$env:VERSION already exists - skipping release creation."
+          } else {
+            gh release create "v$env:VERSION" `
+              --title "v$env:VERSION" `
+              --generate-notes `
+              --latest
+          }
 
       - name: Notify Discord on release
         env:
