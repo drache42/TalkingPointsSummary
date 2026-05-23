@@ -68,7 +68,7 @@ jobs:
             -H "Accept: application/vnd.github.diff" \
             "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" \
             > /tmp/pr.diff 2>/dev/null || true
-          head -c 102400 /tmp/pr.diff > /tmp/pr_truncated.diff
+          head -c 102400 /tmp/pr.diff > /tmp/pr_truncated.diff 2>/dev/null || true
 
       - name: Classify with Claude
         if: ${{ github.event.pull_request.head.repo.fork == false }}
@@ -81,6 +81,17 @@ jobs:
         run: |
           FILES=$(cat /tmp/pr_files.txt 2>/dev/null || echo "")
           DIFF=$(cat /tmp/pr_truncated.diff 2>/dev/null || echo "")
+
+          if [ -z "$ANTHROPIC_MODEL" ]; then
+            echo "ANTHROPIC_MODEL repository variable is not set — skipping classification."
+            echo "classification=unknown" >> "$GITHUB_OUTPUT"
+            {
+              printf 'rationale<<EOF_RATIONALE\n'
+              printf 'ANTHROPIC_MODEL repository variable is not configured — set it in repository variables and apply a semver label manually.\n'
+              printf 'EOF_RATIONALE\n'
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           PAYLOAD=$(jq -n \
             --arg title "$PR_TITLE" \

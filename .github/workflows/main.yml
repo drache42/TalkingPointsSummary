@@ -193,19 +193,6 @@ jobs:
             exit 0
           fi
 
-          # If the most recently merged PR carries skip-release, defer the release.
-          # Its semver label (if any) is still counted when the next release runs.
-          TRIGGER_LABELS=$(echo "$MERGED_PRS" | jq -c 'sort_by(.merged_at) | last | [.labels[].name]')
-          TRIGGER_HAS_SKIP=$(echo "$TRIGGER_LABELS" | jq 'map(select(. == "skip-release")) | length > 0')
-
-          if [ "$TRIGGER_HAS_SKIP" = "true" ]; then
-            echo "Triggering PR has skip-release — deferring release."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "version=$MAJOR.$MINOR.$PATCH" >> "$GITHUB_OUTPUT"
-            echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
           HAS_MAJOR=false
           HAS_MINOR=false
           HAS_PATCH=false
