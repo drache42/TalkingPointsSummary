@@ -54,7 +54,10 @@ try {
         -ContentType 'application/json' `
         -Body $payload
 
-    $parsed        = $response.content[0].text | ConvertFrom-Json -ErrorAction SilentlyContinue
+    $rawText       = $response.content[0].text
+    # Strip markdown code fences that some models add despite being told not to
+    $rawText       = ($rawText -replace '(?ms)^```[a-zA-Z]*\s*', '') -replace '(?ms)```\s*$', ''
+    $parsed        = $rawText.Trim() | ConvertFrom-Json -ErrorAction SilentlyContinue
     $classification = $parsed.classification
     $rationale      = $parsed.rationale
 } catch {
