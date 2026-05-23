@@ -111,11 +111,14 @@ jobs:
 
           if [ "$HTTP_CODE" = "200" ]; then
             RAW_TEXT=$(jq -r '.content[0].text // empty' /tmp/claude_response.json 2>/dev/null || echo "")
+            # Strip markdown code fences that Claude sometimes adds despite being told not to
+            RAW_TEXT=$(echo "$RAW_TEXT" | sed 's/^```[a-zA-Z]*[[:space:]]*//' | sed 's/```[[:space:]]*$//' | tr -d '\r')
             CLASSIFICATION=$(echo "$RAW_TEXT" | jq -r '.classification // empty' 2>/dev/null || echo "")
             RATIONALE=$(echo "$RAW_TEXT" | jq -r '.rationale // empty' 2>/dev/null || echo "")
           fi
 
           if [ -z "$CLASSIFICATION" ] || ! echo "major minor patch" | grep -qw "$CLASSIFICATION"; then
+            echo "Parse failed. RAW_TEXT was: $RAW_TEXT"
             CLASSIFICATION="unknown"
             RATIONALE="Classification failed (HTTP ${HTTP_CODE}) — please apply a semver label manually."
           fi
