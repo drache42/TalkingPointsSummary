@@ -2,7 +2,7 @@ name: Label Gate
 
 on:
   pull_request:
-    types: [opened, labeled, unlabeled, reopened]
+    types: [opened, synchronize, labeled, unlabeled, reopened]
 
 permissions:
   pull-requests: read
