@@ -11,7 +11,7 @@ A maintainer must apply one of the following labels manually:
 ``semver: major``, ``semver: minor``, ``semver: patch``, or ``skip-release``.
 "@
 
-$comments = @(gh api "repos/$repo/issues/$prNumber/comments" | ConvertFrom-Json)
+$comments = @(gh api "repos/$repo/issues/$prNumber/comments" --paginate --jq '.[]' | ForEach-Object { $_ | ConvertFrom-Json })
 $existing = $comments | Where-Object { $_.body -like "*$marker*" } | Select-Object -First 1
 
 if ($existing) {
