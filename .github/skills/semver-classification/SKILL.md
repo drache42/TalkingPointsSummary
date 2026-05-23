@@ -103,11 +103,42 @@ Default when no `major` or `minor` signals are present. Typical `patch` signals:
 
 ---
 
-## Step 3 — Report the Result
+## Step 3 — Suggest a PR Title
+
+The PR title appears verbatim in **GitHub release notes**, so it must be meaningful to someone reading a changelog — not just the developer who wrote the code.
+
+### Title Rules
+
+- **Lead with the user-facing impact**, not the implementation detail
+  - ✅ `Add per-feed scheduling for digest delivery`
+  - ❌ `Refactor DigestSchedulerService constructor injection`
+- **Be specific enough to distinguish this release from others** — avoid vague titles like `Bug fix` or `Updates`
+- **Keep it under ~72 characters** so it renders cleanly in release notes and email digests
+- **Use sentence case** (capitalize first word and proper nouns only)
+- **Do not prefix with the semver level** (e.g. avoid `[minor]` or `feat:`) — GitHub release notes already group by tag; the prefix is noise
+- **Do mention the affected area** when it helps readers understand scope (e.g. `Admin UI`, `CLI`, `digest email`, `feed scraper`)
+- If the change is a **breaking change**, append ` — breaking change` at the end so it is unmissable in release notes
+
+### Title Examples by Bump Level
+
+| Bump | Example title |
+|---|---|
+| `patch` | `Fix duplicate entries in weekly digest when feed returns stale items` |
+| `patch` | `Upgrade Azure SDK packages to address security advisory` |
+| `minor` | `Add per-feed scheduling for digest delivery` |
+| `minor` | `Add admin UI page for managing feed sources` |
+| `major` | `Rename \`run\` CLI command to \`execute\` — breaking change` |
+| `major` | `Remove legacy \`SmtpDelivery\` configuration key — breaking change` |
+
+---
+
+## Step 4 — Report the Result
 
 Present the classification in this format:
 
 ```
+**Suggested PR title:** <title following the rules in Step 3>
+
 **Suggested semver bump:** `patch` | `minor` | `major`
 
 **Rationale:** <One sentence naming the primary signal, e.g.:
