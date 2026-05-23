@@ -13,6 +13,9 @@ jobs:
   classify:
     name: Classify PR semver bump
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: pwsh
     env:
       GH_TOKEN: ${{ github.token }}
 
@@ -54,89 +57,18 @@ jobs:
 
       - name: Fetch PR diff
         if: ${{ github.event.pull_request.head.repo.fork == false }}
-        shell: bash
-        run: |
-          # Fetch complete file list with per-file stats (never truncated)
-          gh api \
-            --paginate \
-            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-            --jq '.[] | "\(.status)\t\(.filename)\t+\(.additions)/-\(.deletions)"' \
-            > /tmp/pr_files.txt 2>/dev/null || true
-
-          # Fetch full diff and truncate to ~100 KB for diff content
-          gh api \
-            -H "Accept: application/vnd.github.diff" \
-            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}" \
-            > /tmp/pr.diff 2>/dev/null || true
-          head -c 102400 /tmp/pr.diff > /tmp/pr_truncated.diff 2>/dev/null || true
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: .github/scripts/fetch-pr-diff.ps1
 
       - name: Classify with Claude
         if: ${{ github.event.pull_request.head.repo.fork == false }}
         id: classify
-        shell: bash
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-        run: |
-          FILES=$(cat /tmp/pr_files.txt 2>/dev/null || echo "")
-          DIFF=$(cat /tmp/pr_truncated.diff 2>/dev/null || echo "")
-
-          if [ -z "$ANTHROPIC_MODEL" ]; then
-            echo "ANTHROPIC_MODEL repository variable is not set — skipping classification."
-            echo "classification=unknown" >> "$GITHUB_OUTPUT"
-            {
-              printf 'rationale<<EOF_RATIONALE\n'
-              printf 'ANTHROPIC_MODEL repository variable is not configured — set it in repository variables and apply a semver label manually.\n'
-              printf 'EOF_RATIONALE\n'
-            } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          PAYLOAD=$(jq -n \
-            --arg title "$PR_TITLE" \
-            --arg files "$FILES" \
-            --arg diff "$DIFF" \
-            --arg model "$ANTHROPIC_MODEL" \
-            '{
-              model: $model,
-              max_tokens: 256,
-              system: "You are a semantic versioning expert for the TalkingPointsSummary application. Apply standard semver principles adapted for a deployed application: major = breaking deployment (destructive DB schema changes, config key renames/removals, CLI command removals); minor = new backward-compatible capability; patch = everything else. The changed-files list is always complete; the diff content may be truncated on very large PRs.\n\nProject-specific rules (apply the HIGHEST matching tier):\n\nMAJOR (breaking change): EF Core migration with DROP TABLE/DROP COLUMN/TRUNCATE/destructive ALTER COLUMN; config key removed or renamed in appsettings.json or option classes; CLI command removed or renamed; commit message contains \"BREAKING CHANGE:\"\n\nMINOR (new backward-compatible feature): new service or class added to Services/ or Pipeline/; new EF Core migration that only adds tables or columns; new config option with safe default; new admin UI page or Blazor component; new CLI command; new AI prompt file in Prompts/\n\nPATCH (default): bug fixes; changes only in tests/ docs/ or *.md files; CI/infra/build changes (.github/ infra/); refactors with no behavioral change; dependency version bumps; logging improvements\n\nRespond with valid JSON only, no other text: {\"classification\": \"major\"|\"minor\"|\"patch\", \"rationale\": \"one sentence explaining the primary signal\"}",
-              messages: [{
-                role: "user",
-                content: ("PR Title: " + $title + "\n\nChanged files (complete):\n" + $files + "\n\nDiff (may be truncated):\n" + $diff)
-              }]
-            }')
-
-          HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/claude_response.json \
-            -X POST "https://api.anthropic.com/v1/messages" \
-            -H "x-api-key: $ANTHROPIC_API_KEY" \
-            -H "anthropic-version: 2023-06-01" \
-            -H "content-type: application/json" \
-            -d "$PAYLOAD" 2>/dev/null) || HTTP_CODE="000"
-
-          echo "HTTP status: $HTTP_CODE"
-
-          CLASSIFICATION=""
-          RATIONALE=""
-
-          if [ "$HTTP_CODE" = "200" ]; then
-            RAW_TEXT=$(jq -r '.content[0].text // empty' /tmp/claude_response.json 2>/dev/null || echo "")
-            CLASSIFICATION=$(echo "$RAW_TEXT" | jq -r '.classification // empty' 2>/dev/null || echo "")
-            RATIONALE=$(echo "$RAW_TEXT" | jq -r '.rationale // empty' 2>/dev/null || echo "")
-          fi
-
-          if [ -z "$CLASSIFICATION" ] || ! echo "major minor patch" | grep -qw "$CLASSIFICATION"; then
-            CLASSIFICATION="unknown"
-            RATIONALE="Classification failed (HTTP ${HTTP_CODE}) — please apply a semver label manually."
-          fi
-
-          echo "classification=$CLASSIFICATION" >> "$GITHUB_OUTPUT"
-          {
-            printf 'rationale<<EOF_RATIONALE\n'
-            printf '%s\n' "$RATIONALE"
-            printf 'EOF_RATIONALE\n'
-          } >> "$GITHUB_OUTPUT"
+        run: .github/scripts/classify-pr.ps1
 
       - name: Apply label and post comment
         if: ${{ github.event.pull_request.head.repo.fork == false }}
@@ -218,24 +150,11 @@ jobs:
           ${{ github.event.pull_request.head.repo.fork == false &&
               github.actor == 'dependabot[bot]' &&
               steps.classify.outputs.classification == 'major' }}
-        shell: bash
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-        run: |
-          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
-            echo "DISCORD_WEBHOOK_URL not set. Skipping."
-            exit 0
-          fi
+          DISCORD_MESSAGE: |
+            ⚠️ **Dependabot breaking-change detected** — manual review required before merging.
 
-          echo "::add-mask::$DISCORD_WEBHOOK_URL"
-
-          PAYLOAD=$(jq -n \
-            --arg title "$PR_TITLE" \
-            --arg url "$PR_URL" \
-            '{content: ("⚠️ **Dependabot breaking-change detected** — manual review required before merging.\n\nPR: " + $title + "\n" + $url)}')
-
-          curl -s -X POST "$DISCORD_WEBHOOK_URL" \
-            -H "Content-Type: application/json" \
-            -d "$PAYLOAD"
+            PR: ${{ github.event.pull_request.title }}
+            ${{ github.event.pull_request.html_url }}
+        run: .github/scripts/notify-discord.ps1

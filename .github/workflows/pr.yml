@@ -12,6 +12,9 @@ jobs:
   validate:
     name: Build and test
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: pwsh
 
     steps:
       - name: Check out repository
@@ -60,55 +63,7 @@ jobs:
 
       - name: Publish test summary
         if: always()
-        shell: pwsh
-        run: |
-          function Get-Count($Counters, [string]$Name) {
-            $value = $Counters.$Name
-            if ([string]::IsNullOrWhiteSpace("$value")) {
-              return 0
-            }
-
-            return [int]$value
-          }
-
-          $trxFiles = Get-ChildItem -Path artifacts/test-results -Filter *.trx -Recurse -ErrorAction SilentlyContinue
-          if (-not $trxFiles) {
-            "## Test Results`n`nNo TRX files were produced." | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-            exit 0
-          }
-
-          $rows = New-Object System.Collections.Generic.List[string]
-          $total = 0
-          $passed = 0
-          $failed = 0
-          $skipped = 0
-
-          foreach ($trxFile in $trxFiles) {
-            [xml]$trx = Get-Content -Path $trxFile.FullName -Raw
-            $counters = $trx.TestRun.ResultSummary.Counters
-
-            $fileTotal = Get-Count $counters total
-            $filePassed = Get-Count $counters passed
-            $fileFailed = (Get-Count $counters failed) + (Get-Count $counters error) + (Get-Count $counters timeout) + (Get-Count $counters aborted)
-            $fileSkipped = (Get-Count $counters notExecuted) + (Get-Count $counters notRunnable) + (Get-Count $counters inconclusive)
-
-            $total += $fileTotal
-            $passed += $filePassed
-            $failed += $fileFailed
-            $skipped += $fileSkipped
-
-            $rows.Add("| $($trxFile.BaseName) | $filePassed | $fileFailed | $fileSkipped | $fileTotal |")
-          }
-
-          @(
-            "## Test Results"
-            ""
-            "| Suite | Passed | Failed | Skipped | Total |"
-            "| --- | ---: | ---: | ---: | ---: |"
-            $rows
-            ""
-            "**Overall:** Passed $passed, Failed $failed, Skipped $skipped, Total $total"
-          ) | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+        run: .github/scripts/publish-test-summary.ps1
 
       - name: Upload test results
         if: always()
@@ -120,9 +75,11 @@ jobs:
 
       - name: Fail workflow on test errors
         if: always()
-        shell: pwsh
+        env:
+          UNIT_OUTCOME: ${{ steps.unit_tests.outcome }}
+          INTEGRATION_OUTCOME: ${{ steps.integration_tests.outcome }}
         run: |
-          if ('${{ steps.unit_tests.outcome }}' -eq 'failure' -or '${{ steps.integration_tests.outcome }}' -eq 'failure') {
+          if ($env:UNIT_OUTCOME -eq 'failure' -or $env:INTEGRATION_OUTCOME -eq 'failure') {
             throw 'One or more test suites failed.'
           }
 
@@ -132,27 +89,18 @@ jobs:
     needs:
       - validate
     if: ${{ always() && needs.validate.result == 'failure' && github.event.pull_request.head.repo.full_name == github.repository }}
+    defaults:
+      run:
+        shell: pwsh
 
     steps:
       - name: Post failure notification
-        shell: pwsh
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:DISCORD_WEBHOOK_URL)) {
-            Write-Host 'DISCORD_WEBHOOK_URL is not set. Skipping notification.'
-            exit 0
-          }
-
-          Write-Output "::add-mask::$env:DISCORD_WEBHOOK_URL"
-
-          $message = @(
-            "PR workflow failed."
-            "Repository: ${{ github.repository }}"
-            "PR: #${{ github.event.pull_request.number }}"
-            "Branch: ${{ github.head_ref }}"
-            "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          ) -join "`n"
-
-          $payload = @{ content = $message } | ConvertTo-Json -Compress
-          Invoke-RestMethod -Method Post -Uri $env:DISCORD_WEBHOOK_URL -ContentType 'application/json' -Body $payload | Out-Null
+          DISCORD_MESSAGE: |
+            PR workflow failed.
+            Repository: ${{ github.repository }}
+            PR: #${{ github.event.pull_request.number }}
+            Branch: ${{ github.head_ref }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: .github/scripts/notify-discord.ps1
