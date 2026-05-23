@@ -9,6 +9,7 @@ namespace TalkingPointsSummary.Services;
 public sealed class SummaryPromptBuilder
 {
     private const string TodayToken = "{{TODAY}}";
+    private const string WeekCalendarToken = "{{WEEK_CALENDAR}}";
     private const string ContextToken = "{{CONTEXT}}";
     private const string RecentNewsToken = "{{RECENT_NEWS}}";
     private const string PreviousSummariesToken = "{{PREVIOUS_SUMMARIES}}";
@@ -75,6 +76,7 @@ public sealed class SummaryPromptBuilder
     {
         var prompt = _template;
         prompt = prompt.Replace(TodayToken, now.ToString("dddd, MMMM d, yyyy"), StringComparison.Ordinal);
+        prompt = prompt.Replace(WeekCalendarToken, BuildWeekCalendar(now), StringComparison.Ordinal);
         prompt = prompt.Replace(ContextToken, BuildContext(children, now), StringComparison.Ordinal);
         prompt = prompt.Replace(RecentNewsToken, BuildRecentNews(newsItems), StringComparison.Ordinal);
         prompt = prompt.Replace(PreviousSummariesToken, BuildPreviousSummaries(previousSummaries), StringComparison.Ordinal);
@@ -82,6 +84,17 @@ public sealed class SummaryPromptBuilder
         prompt = prompt.Replace(ChildSectionsToken, BuildChildSections(children, now), StringComparison.Ordinal);
         prompt = prompt.Replace(SchoolDateSectionsToken, BuildSchoolDateSections(children), StringComparison.Ordinal);
         return prompt;
+    }
+
+    private static string BuildWeekCalendar(DateTime now)
+    {
+        var builder = new StringBuilder();
+        for (var i = -7; i <= 14; i++)
+        {
+            var date = now.AddDays(i);
+            builder.AppendLine($"     - {date:dddd, MMMM d, yyyy}");
+        }
+        return builder.ToString().TrimEnd();
     }
 
     private string BuildContext(IEnumerable<Child> children, DateTime now)
