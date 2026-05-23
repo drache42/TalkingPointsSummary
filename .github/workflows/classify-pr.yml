@@ -22,38 +22,9 @@ jobs:
     steps:
       - name: Post fork notice
         if: ${{ github.event.pull_request.head.repo.fork == true }}
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const marker = '<!-- semver-bot -->';
-            const body = [
-              marker,
-              '⚠️ **SemVer classification skipped** — this PR is from a fork.',
-              'A maintainer must apply one of the following labels manually:',
-              '`semver: major`, `semver: minor`, `semver: patch`, or `skip-release`.',
-            ].join('\n');
-
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const existing = comments.find(c => c.body.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-            }
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: .github/scripts/post-fork-notice.ps1
 
       - name: Checkout
         if: ${{ github.event.pull_request.head.repo.fork == false }}
@@ -76,78 +47,11 @@ jobs:
 
       - name: Apply label and post comment
         if: ${{ github.event.pull_request.head.repo.fork == false }}
-        uses: actions/github-script@v7
         env:
           CLASSIFICATION: ${{ steps.classify.outputs.classification }}
           RATIONALE: ${{ steps.classify.outputs.rationale }}
-        with:
-          script: |
-            const classification = process.env.CLASSIFICATION || 'unknown';
-            const rationale = process.env.RATIONALE || 'No rationale provided.';
-
-            const labelMap = {
-              major: 'semver: major',
-              minor: 'semver: minor',
-              patch: 'semver: patch',
-              unknown: 'semver: unknown',
-            };
-            const semverLabels = Object.values(labelMap);
-            const labelToApply = labelMap[classification] ?? 'semver: unknown';
-
-            // Remove existing semver: * labels except the one we're applying
-            const { data: currentLabels } = await github.rest.issues.listLabelsOnIssue({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            for (const label of currentLabels) {
-              if (semverLabels.includes(label.name) && label.name !== labelToApply) {
-                await github.rest.issues.removeLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.issue.number,
-                  name: label.name,
-                });
-              }
-            }
-
-            // Apply label if not already present
-            if (!currentLabels.some(l => l.name === labelToApply)) {
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                labels: [labelToApply],
-              });
-            }
-
-            // Post or update bot comment
-            const marker = '<!-- semver-bot -->';
-            const emojiMap = { major: '🔴', minor: '🟡', patch: '🟢', unknown: '🟠' };
-            const emoji = emojiMap[classification] ?? '🟠';
-            const body = `${marker}\n${emoji} **SemVer classification:** \`${labelToApply}\`\n\n**Rationale:** ${rationale}`;
-
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const existing = comments.find(c => c.body.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-            }
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: .github/scripts/apply-semver-label.ps1
 
       - name: Notify Discord on Dependabot major classification
         if: >-
