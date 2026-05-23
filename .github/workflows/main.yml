@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - main
-    tags:
-      - v*.*.*
-      - '!v*.*.*-*'
   workflow_dispatch:
 
 permissions:
@@ -196,24 +193,37 @@ jobs:
             exit 0
           fi
 
+          # If the most recently merged PR carries skip-release, defer the release.
+          # Its semver label (if any) is still counted when the next release runs.
+          TRIGGER_LABELS=$(echo "$MERGED_PRS" | jq -c 'sort_by(.merged_at) | last | [.labels[].name]')
+          TRIGGER_HAS_SKIP=$(echo "$TRIGGER_LABELS" | jq 'map(select(. == "skip-release")) | length > 0')
+
+          if [ "$TRIGGER_HAS_SKIP" = "true" ]; then
+            echo "Triggering PR has skip-release — deferring release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "version=$MAJOR.$MINOR.$PATCH" >> "$GITHUB_OUTPUT"
+            echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           HAS_MAJOR=false
           HAS_MINOR=false
           HAS_PATCH=false
-          HAS_NON_SKIP=false
+          HAS_ANY_SEMVER=false
 
           while IFS= read -r LABELS_JSON; do
             [ -z "$LABELS_JSON" ] && continue
             if echo "$LABELS_JSON" | grep -q '"semver: major"'; then
-              HAS_MAJOR=true; HAS_NON_SKIP=true
+              HAS_MAJOR=true; HAS_ANY_SEMVER=true
             elif echo "$LABELS_JSON" | grep -q '"semver: minor"'; then
-              HAS_MINOR=true; HAS_NON_SKIP=true
+              HAS_MINOR=true; HAS_ANY_SEMVER=true
             elif echo "$LABELS_JSON" | grep -q '"semver: patch"'; then
-              HAS_PATCH=true; HAS_NON_SKIP=true
+              HAS_PATCH=true; HAS_ANY_SEMVER=true
             fi
           done <<< "$(echo "$MERGED_PRS" | jq -c '.[] | [.labels[].name]' 2>/dev/null || true)"
 
-          if [ "$HAS_NON_SKIP" = "false" ]; then
-            echo "All merged PRs are skip-release."
+          if [ "$HAS_ANY_SEMVER" = "false" ]; then
+            echo "No semver labels found among merged PRs — skipping release."
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "version=$MAJOR.$MINOR.$PATCH" >> "$GITHUB_OUTPUT"
             echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
@@ -383,84 +393,27 @@ jobs:
             --tag "${{ steps.image_names.outputs.admin }}:latest" \
             "${{ steps.image_names.outputs.admin }}:sha-${{ steps.image_names.outputs.short_sha }}"
 
-  publish-release-tags:
-    name: Promote release tags
-    runs-on: ubuntu-latest
-    needs:
-      - validate
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Verify tag commit is on main
-        shell: bash
+      - name: Notify Discord on release
+        shell: pwsh
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          VERSION: ${{ needs.compute-version.outputs.version }}
         run: |
-          git fetch origin main --depth=1
-          if ! git branch -r --contains "$GITHUB_SHA" | grep -Fq "origin/main"; then
-            echo "Release tags must point at a commit already contained in origin/main."
-            exit 1
-          fi
+          if ([string]::IsNullOrWhiteSpace($env:DISCORD_WEBHOOK_URL)) {
+            Write-Host 'DISCORD_WEBHOOK_URL is not set. Skipping notification.'
+            exit 0
+          }
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+          Write-Output "::add-mask::$env:DISCORD_WEBHOOK_URL"
 
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          $message = @(
+            "🚀 Released v$($env:VERSION)"
+            "Repository: ${{ github.repository }}"
+            "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          ) -join "`n"
 
-      - name: Compute release metadata
-        id: release
-        shell: bash
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Release tags must match v<major>.<minor>.<patch>."
-            exit 1
-          fi
-
-          repo_lower=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
-          short_sha="${GITHUB_SHA::7}"
-          major_minor="$(echo "$version" | cut -d. -f1-2)"
-
-          echo "worker=ghcr.io/${repo_lower}-worker" >> "$GITHUB_OUTPUT"
-          echo "admin=ghcr.io/${repo_lower}-admin" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "major_minor=$major_minor" >> "$GITHUB_OUTPUT"
-          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
-
-      - name: Verify source branch images exist
-        shell: bash
-        run: |
-          docker buildx imagetools inspect "${{ steps.release.outputs.worker }}:sha-${{ steps.release.outputs.short_sha }}" > /dev/null
-          docker buildx imagetools inspect "${{ steps.release.outputs.admin }}:sha-${{ steps.release.outputs.short_sha }}" > /dev/null
-
-      - name: Promote worker image to release tags
-        shell: bash
-        run: |
-          docker buildx imagetools create \
-            --tag "${{ steps.release.outputs.worker }}:${{ steps.release.outputs.version }}" \
-            --tag "${{ steps.release.outputs.worker }}:${{ steps.release.outputs.major_minor }}" \
-            --tag "${{ steps.release.outputs.worker }}:latest" \
-            "${{ steps.release.outputs.worker }}:sha-${{ steps.release.outputs.short_sha }}"
-
-      - name: Promote admin image to release tags
-        shell: bash
-        run: |
-          docker buildx imagetools create \
-            --tag "${{ steps.release.outputs.admin }}:${{ steps.release.outputs.version }}" \
-            --tag "${{ steps.release.outputs.admin }}:${{ steps.release.outputs.major_minor }}" \
-            --tag "${{ steps.release.outputs.admin }}:latest" \
-            "${{ steps.release.outputs.admin }}:sha-${{ steps.release.outputs.short_sha }}"
+          $payload = @{ content = $message } | ConvertTo-Json -Compress
+          Invoke-RestMethod -Method Post -Uri $env:DISCORD_WEBHOOK_URL -ContentType 'application/json' -Body $payload | Out-Null
 
   notify-discord:
     name: Notify Discord on failures
@@ -470,14 +423,12 @@ jobs:
       - compute-version
       - publish-main-images
       - auto-release
-      - publish-release-tags
     if: >-
       ${{ always() && (
         needs.validate.result == 'failure' ||
         needs.compute-version.result == 'failure' ||
         needs.publish-main-images.result == 'failure' ||
-        needs.auto-release.result == 'failure' ||
-        needs.publish-release-tags.result == 'failure'
+        needs.auto-release.result == 'failure'
       ) }}
 
     steps:

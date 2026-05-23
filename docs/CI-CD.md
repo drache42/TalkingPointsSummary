@@ -1,6 +1,6 @@
 # CI/CD
 
-This repository uses GitHub Actions for pull request validation, main-branch publishing, release tag promotion, and Dependabot automation.
+This repository uses GitHub Actions for pull request validation, main-branch publishing, and Dependabot automation.
 
 ## Workflows
 
@@ -16,6 +16,28 @@ The pull request workflow is defined in `.github/workflows/pr.yml`.
 
 Discord notifications are sent for failed PR runs only when the pull request branch lives in this repository. Fork-based PRs do not receive Discord notifications because repository secrets are not exposed to forked pull request workflows.
 
+### Label gate
+
+The label gate is defined in `.github/workflows/label-gate.yml` and is configured as a required status check on `main`.
+
+- Trigger: every pull request opened, labeled, unlabeled, or reopened against `main`
+- Runs: checks that the PR carries exactly one qualifying label — `semver: major`, `semver: minor`, `semver: patch`, or `skip-release`
+- Pass: merge button is enabled
+- Fail: merge button is disabled until a qualifying label is applied and the check reruns
+
+`semver: unknown` does not pass the gate. A human must replace it with a concrete label before the PR can merge.
+
+### PR classification
+
+The classification workflow is defined in `.github/workflows/classify-pr.yml`.
+
+- Trigger: every pull request opened or synchronized against `main` (uses `pull_request_target` so it has access to secrets)
+- Behavior: fetches the PR diff via the GitHub API, calls Claude 3.5 Haiku to classify the change as `major`, `minor`, or `patch`, removes any stale `semver:` label, applies the new label, and posts or updates a bot comment with the classification and rationale
+- Fork PRs: classification is skipped; a comment is posted instructing the maintainer to label manually
+- API failure: `semver: unknown` is applied and the label gate blocks merge until a human resolves it
+
+Classification runs automatically but humans can override the label at any time. The label gate checks the label, not the classification source.
+
 ### Main pipeline
 
 The main pipeline is defined in `.github/workflows/main.yml`.
@@ -23,32 +45,26 @@ The main pipeline is defined in `.github/workflows/main.yml`.
 - Trigger: every push to `main`
 - Manual trigger: `workflow_dispatch` is enabled so you can run the validation path against a selected branch from the Actions tab
 - Runs: restore, build, unit tests, and integration tests
-- On success for `main` pushes: builds and publishes both container images to `ghcr.io`
+- Concurrency: runs are serialized with `cancel-in-progress: false` so queued merges complete in order
 
-Published branch tags:
+On success for `main` pushes, three jobs run in sequence after `validate`:
+
+1. **`compute-version`** — queries all PRs merged since the last release tag, takes the highest `semver:` label, and computes the next version. If all merged PRs carry `skip-release`, outputs `skip=true` and no release is created.
+2. **`publish-main-images`** — builds and pushes both container images to `ghcr.io`, stamping `VERSION` and `COMMIT_SHA` into the binaries via `dotnet publish`.
+3. **`auto-release`** — skipped when `skip=true`. Creates an annotated git tag and promotes both images to versioned release tags.
+
+Published tags after every `main` push:
 
 - Worker: `ghcr.io/<owner>/<repo>-worker:main`
 - Worker: `ghcr.io/<owner>/<repo>-worker:sha-<shortsha>`
 - Admin: `ghcr.io/<owner>/<repo>-admin:main`
 - Admin: `ghcr.io/<owner>/<repo>-admin:sha-<shortsha>`
 
-`latest` is intentionally not updated on ordinary pushes to `main`.
-
-### Release tag promotion
-
-The same main pipeline also handles stable releases.
-
-- Trigger: pushing a git tag that matches `v<major>.<minor>.<patch>`
-- Guardrail: the tagged commit must already be contained in `origin/main`
-- Behavior: the workflow promotes the already-published `sha-<shortsha>` images to stable release tags instead of rebuilding them
-
-Published stable tags:
+Additional tags published when `auto-release` runs:
 
 - `<major>.<minor>.<patch>`
 - `<major>.<minor>`
 - `latest`
-
-This keeps semver human-controlled while preserving an exact link between the stable release tag and the image built from the main-branch commit.
 
 ### Dependabot
 
@@ -71,21 +87,19 @@ Dependabot auto-merge is defined in `.github/workflows/automerge.yml`.
 Container versioning is split into build identity and release identity.
 
 - Build identity comes from `main` branch publishes: `sha-<shortsha>` and `main`
-- Release identity comes from manual semver tags such as `v1.2.3`
+- Release identity is computed automatically from PR semver labels
 
-Recommended release flow:
+### Automated release flow
 
-1. Merge changes into `main`
-2. Wait for the `main.yml` workflow to publish `sha-<shortsha>` images
-3. Decide the semantic version manually based on compatibility impact
-4. Create and push a git tag such as `v1.2.3` on that exact commit
-5. Let `main.yml` promote the `sha-<shortsha>` images to `1.2.3`, `1.2`, and `latest`
+Releases are created automatically when a PR merges to `main`. The `compute-version` job reads the `semver:` labels of all PRs merged since the last release tag and bumps the version accordingly. No manual tagging is required for day-to-day releases.
 
-Use semver conservatively:
+PRs labelled `skip-release` merge without producing a release. When all PRs since the last tag carry `skip-release`, the release step is skipped entirely and only the `main` and `sha-*` images are published.
 
-- `MAJOR`: incompatible changes to operator-visible behavior such as configuration keys, CLI contracts, image behavior, or deployment expectations
-- `MINOR`: backward-compatible new features
-- `PATCH`: backward-compatible fixes and security updates
+### Semver rules
+
+- `semver: major` — incompatible changes to operator-visible behavior such as configuration keys, CLI contracts, image behavior, or deployment expectations
+- `semver: minor` — backward-compatible new features
+- `semver: patch` — backward-compatible fixes and security updates
 
 ## Required repository settings and secrets
 
@@ -93,14 +107,21 @@ Use semver conservatively:
 
 Enable these repository settings:
 
-1. Protect `main` and require the PR validation workflow to pass before merge
+1. Configure a branch ruleset targeting `main` with `label-gate` as a required status check
 2. Enable auto-merge in the repository settings so Dependabot PRs can enter GitHub's built-in auto-merge flow
 
 ### Secrets
 
-Add this repository secret if you want Discord notifications:
+| Secret | Required | Purpose |
+| --- | --- | --- |
+| `ANTHROPIC_API_KEY` | Yes | Enables `classify-pr.yml` to call the Anthropic API for automatic PR classification. Without this, classification fails and `semver: unknown` is applied. |
+| `DISCORD_WEBHOOK_URL` | No | Discord webhook URL for pipeline failure, release, and Dependabot breaking-change notifications. |
 
-- `DISCORD_WEBHOOK_URL`: Discord webhook URL for failure notifications from trusted workflows
+### Repository variables
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `ANTHROPIC_MODEL` | Yes | The Anthropic model ID used by `classify-pr.yml` (e.g. `claude-haiku-4-5`). Update this variable to switch models without modifying workflow files. |
 
 No separate registry secret is required for `ghcr.io` publishing. The workflows use `GITHUB_TOKEN` with `packages: write` permission.
 
@@ -120,7 +141,7 @@ This is the recommended primary workflow for testing CI changes.
 
 `main.yml` includes `workflow_dispatch`, so once that workflow file exists on the default branch you can manually run it from the Actions tab and pick a branch.
 
-This is useful for testing the validation portion of `main.yml` on a feature branch. Manual runs do not publish images because the publish jobs are gated to real `push` events for `main` and release tags.
+This is useful for testing the validation portion of `main.yml` on a feature branch. Manual runs do not publish images because the publish jobs are gated to real `push` events for `main`.
 
 ### Local execution with `act`
 

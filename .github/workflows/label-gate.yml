@@ -16,7 +16,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const qualifying = ['semver: major', 'semver: minor', 'semver: patch', 'skip-release'];
+            const semverLabels = ['semver: major', 'semver: minor', 'semver: patch'];
 
             const { data: labels } = await github.rest.issues.listLabelsOnIssue({
               owner: context.repo.owner,
@@ -24,16 +24,19 @@ jobs:
               issue_number: context.issue.number,
             });
 
-            const found = labels.filter(l => qualifying.includes(l.name));
+            const allLabelNames = labels.map(l => l.name);
+            const hasSkipRelease = allLabelNames.includes('skip-release');
+            const semverFound = semverLabels.filter(l => allLabelNames.includes(l));
 
-            if (found.length === 1) {
-              core.info(`PR has qualifying label: ${found[0].name}`);
-            } else if (found.length === 0) {
+            if (semverFound.length > 1) {
               core.setFailed(
-                'PR must have exactly one of: semver: major, semver: minor, semver: patch, skip-release'
+                `PR has multiple semver labels (${semverFound.join(', ')}). Remove all but one.`
+              );
+            } else if (semverFound.length === 0 && !hasSkipRelease) {
+              core.setFailed(
+                'PR must have exactly one of: semver: major, semver: minor, semver: patch, or skip-release.'
               );
             } else {
-              core.setFailed(
-                `PR has ${found.length} qualifying labels: ${found.map(l => l.name).join(', ')}. Remove all but one.`
-              );
+              const active = [...semverFound, ...(hasSkipRelease ? ['skip-release'] : [])];
+              core.info(`PR labels OK: ${active.join(' + ')}`);
             }
