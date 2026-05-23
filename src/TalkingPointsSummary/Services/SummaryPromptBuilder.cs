@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using TalkingPointsSummary.Models;
 
@@ -75,8 +76,8 @@ public sealed class SummaryPromptBuilder
         List<Summary> previousSummaries)
     {
         var prompt = _template;
-        prompt = prompt.Replace(TodayToken, now.ToString("dddd, MMMM d, yyyy"), StringComparison.Ordinal);
-        prompt = prompt.Replace(WeekCalendarToken, BuildWeekCalendar(now), StringComparison.Ordinal);
+        prompt = prompt.Replace(TodayToken, now.ToString("dddd, MMMM d, yyyy", CultureInfo.InvariantCulture), StringComparison.Ordinal);
+        prompt = prompt.Replace(WeekCalendarToken, BuildDateReferenceCalendar(now), StringComparison.Ordinal);
         prompt = prompt.Replace(ContextToken, BuildContext(children, now), StringComparison.Ordinal);
         prompt = prompt.Replace(RecentNewsToken, BuildRecentNews(newsItems), StringComparison.Ordinal);
         prompt = prompt.Replace(PreviousSummariesToken, BuildPreviousSummaries(previousSummaries), StringComparison.Ordinal);
@@ -86,13 +87,14 @@ public sealed class SummaryPromptBuilder
         return prompt;
     }
 
-    private static string BuildWeekCalendar(DateTime now)
+    private static string BuildDateReferenceCalendar(DateTime now)
     {
         var builder = new StringBuilder();
         for (var i = -7; i <= 14; i++)
         {
             var date = now.AddDays(i);
-            builder.AppendLine($"     - {date:dddd, MMMM d, yyyy}");
+            var formatted = date.ToString("dddd, MMMM d, yyyy", CultureInfo.InvariantCulture);
+            builder.AppendLine($"     - {formatted}");
         }
         return builder.ToString().TrimEnd();
     }
