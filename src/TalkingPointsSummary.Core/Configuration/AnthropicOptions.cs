@@ -21,10 +21,12 @@ public sealed class AnthropicOptions
     /// <summary>
     /// Anthropic model used for full weekly summary generation.
     /// </summary>
+    [Required]
     public string SummaryModel { get; set; } = "claude-sonnet-4-5-20250929";
 
     /// <summary>
     /// Anthropic model used for fast message categorization.
     /// </summary>
+    [Required]
     public string CategorizationModel { get; set; } = "claude-haiku-4-5-20251001";
 }
