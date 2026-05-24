@@ -80,7 +80,7 @@ public partial class MessageCategorizer : IMessageCategorizer
 
         var requestBody = new
         {
-            model = "claude-haiku-4-5-20251001",
+            model = _anthropic.CategorizationModel,
             max_tokens = 1024,
             messages = new[]
             {

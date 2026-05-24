@@ -10,6 +10,7 @@ namespace TalkingPointsSummary.Services;
 public sealed class SummaryPromptBuilder
 {
     private const string TodayToken = "{{TODAY}}";
+    private const string SummaryTitleToken = "{{SUMMARY_TITLE}}";
     private const string WeekCalendarToken = "{{WEEK_CALENDAR}}";
     private const string ContextToken = "{{CONTEXT}}";
     private const string RecentNewsToken = "{{RECENT_NEWS}}";
@@ -77,6 +78,7 @@ public sealed class SummaryPromptBuilder
     {
         var prompt = _template;
         prompt = prompt.Replace(TodayToken, now.ToString("dddd, MMMM d, yyyy", CultureInfo.InvariantCulture), StringComparison.Ordinal);
+        prompt = prompt.Replace(SummaryTitleToken, $"# 🏫 School News Digest — {now.ToString("dddd, MMMM d, yyyy", CultureInfo.InvariantCulture)}", StringComparison.Ordinal);
         prompt = prompt.Replace(WeekCalendarToken, BuildDateReferenceCalendar(now), StringComparison.Ordinal);
         prompt = prompt.Replace(ContextToken, BuildContext(children, now), StringComparison.Ordinal);
         prompt = prompt.Replace(RecentNewsToken, BuildRecentNews(newsItems), StringComparison.Ordinal);

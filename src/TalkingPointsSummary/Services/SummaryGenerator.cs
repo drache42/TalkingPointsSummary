@@ -20,6 +20,7 @@ public class SummaryGenerator : ISummaryGenerator
     private readonly AnthropicOptions _anthropic;
     private readonly ILogger<SummaryGenerator> _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly TimeZoneInfo _scheduleTimeZone;
     private readonly SummaryPromptBuilder _promptBuilder;
 
     /// <summary>
@@ -28,6 +29,7 @@ public class SummaryGenerator : ISummaryGenerator
     /// <param name="httpClient">HTTP client used to call Anthropic.</param>
     /// <param name="db">Database context used to load news, summaries, and children.</param>
     /// <param name="anthropic">Anthropic API configuration.</param>
+    /// <param name="schedule">Pipeline schedule configuration, used to determine the local timezone for prompt dates.</param>
     /// <param name="logger">Logger used for generation diagnostics.</param>
     /// <param name="gradeCalculator">Grade calculator used when building the prompt.</param>
     /// <param name="timeProvider">Optional time provider used to define the summary window.</param>
@@ -35,6 +37,7 @@ public class SummaryGenerator : ISummaryGenerator
         HttpClient httpClient,
         AppDbContext db,
         IOptions<AnthropicOptions> anthropic,
+        IOptions<PipelineScheduleOptions> schedule,
         ILogger<SummaryGenerator> logger,
         IGradeCalculator gradeCalculator,
         TimeProvider? timeProvider = null)
@@ -42,6 +45,7 @@ public class SummaryGenerator : ISummaryGenerator
         _httpClient = httpClient;
         _db = db;
         _anthropic = anthropic.Value;
+        _scheduleTimeZone = TimeZoneInfo.FindSystemTimeZoneById(schedule.Value.TimeZone);
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _promptBuilder = new SummaryPromptBuilder(gradeCalculator);
@@ -52,8 +56,9 @@ public class SummaryGenerator : ISummaryGenerator
     /// </summary>
     public async Task<string?> GenerateAsync(Parent parent, CancellationToken ct = default)
     {
-        var now = _timeProvider.GetUtcDateTime();
-        var sixWeeksAgo = now.AddDays(-42);
+        var nowUtc = _timeProvider.GetUtcDateTime();
+        var nowLocal = TimeZoneInfo.ConvertTimeFromUtc(nowUtc, _scheduleTimeZone);
+        var sixWeeksAgo = nowUtc.AddDays(-42);
 
         var newsItems = await _db.NewsItems
             .Where(n => n.ParentId == parent.Id && n.CreatedAt > sixWeeksAgo)
@@ -75,14 +80,14 @@ public class SummaryGenerator : ISummaryGenerator
             .Where(c => c.ParentId == parent.Id)
             .ToListAsync(ct);
 
-        var prompt = _promptBuilder.Build(now, children, newsItems, previousSummaries);
+        var prompt = _promptBuilder.Build(nowLocal, children, newsItems, previousSummaries);
 
         _logger.LogInformation("Generating summary for parent {ParentName} with {NewsCount} news items",
             parent.Name, newsItems.Count);
 
         var requestBody = new
         {
-            model = "claude-sonnet-4-5-20250929",
+            model = _anthropic.SummaryModel,
             max_tokens = 8192,
             messages = new[]
             {
