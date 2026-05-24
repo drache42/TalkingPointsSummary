@@ -131,9 +131,9 @@ public class SummaryPromptBuilderTests
     /// Verifies that all supported template tokens are replaced during prompt generation.
     /// </summary>
     [Fact]
-    public void Build_AllSevenTokensAreReplaced()
+    public void Build_AllEightTokensAreReplaced()
     {
-        var template = "{{TODAY}}|{{CONTEXT}}|{{RECENT_NEWS}}|{{PREVIOUS_SUMMARIES}}|{{SCHOOL_WIDE_SECTIONS}}|{{CHILD_SECTIONS}}|{{SCHOOL_DATE_SECTIONS}}";
+        var template = "{{TODAY}}|{{WEEK_CALENDAR}}|{{CONTEXT}}|{{RECENT_NEWS}}|{{PREVIOUS_SUMMARIES}}|{{SCHOOL_WIDE_SECTIONS}}|{{CHILD_SECTIONS}}|{{SCHOOL_DATE_SECTIONS}}";
         var builder = new SummaryPromptBuilder(template);
 
         var children = new List<Child>
@@ -145,5 +145,19 @@ public class SummaryPromptBuilderTests
 
         prompt.Should().NotContain("{{");
         prompt.Should().NotContain("}}");
+    }
+
+    [Fact]
+    public void Build_WeekCalendar_IsReplacedWithExpectedDateRange()
+    {
+        var builder = new SummaryPromptBuilder("{{WEEK_CALENDAR}}");
+        var now = new DateTime(2026, 3, 9, 12, 0, 0, DateTimeKind.Utc);
+
+        var prompt = builder.Build(now, [], [], []);
+
+        prompt.Should().NotContain("{{WEEK_CALENDAR}}");
+        prompt.Should().Contain("Monday, March 2, 2026");   // -7 days (start)
+        prompt.Should().Contain("Monday, March 9, 2026");   // today
+        prompt.Should().Contain("Monday, March 23, 2026");  // +14 days (end)
     }
 }
