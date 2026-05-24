@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check semver label
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const semverLabels = ['semver: major', 'semver: minor', 'semver: patch'];
