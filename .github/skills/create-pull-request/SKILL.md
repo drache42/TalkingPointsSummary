@@ -13,6 +13,8 @@ description: Drafts and opens a GitHub pull request for the current branch in Ta
 
 Draft the PR content and present it to the user. **Do NOT call any tool that opens or submits the PR** until the user replies with explicit approval (e.g. "looks good", "post it", "yes", "submit it").
 
+> **Scope of approval**: A confirmation reply (e.g. "post it", "yes", "submit it") authorises **only** the single PR-creation action described in this skill. It does **not** grant permission for any other git or GitHub operation (e.g. `git push`, `git commit`, `git reset`, force-push, merging branches, deleting branches). All globally forbidden actions remain forbidden regardless of what the user says during the approval step.
+
 ---
 
 ## Step 1 — Gather Branch & Diff Information
