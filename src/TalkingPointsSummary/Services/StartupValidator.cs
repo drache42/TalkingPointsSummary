@@ -70,39 +70,39 @@ public record ValidationCheckResult
 /// </summary>
 public class StartupValidator
 {
-    private readonly AnthropicOptions _anthropic;
+    private readonly AiOptions _ai;
     private readonly BrowserlessOptions _browserless;
     private readonly SmtpOptions _smtp;
     private readonly AppDbContext _db;
     private readonly ITalkingPointsApiClient _talkingPointsClient;
-    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IAiClient _aiClient;
     private readonly ILogger<StartupValidator> _logger;
 
     /// <summary>
     /// Initializes a startup validator for required configuration and external dependencies.
     /// </summary>
-    /// <param name="anthropic">Anthropic configuration.</param>
+    /// <param name="ai">AI configuration.</param>
     /// <param name="browserless">Browserless configuration.</param>
     /// <param name="smtp">SMTP configuration.</param>
     /// <param name="db">Database context used to verify connectivity and migrations.</param>
     /// <param name="talkingPointsClient">TalkingPoints client used to probe API access.</param>
-    /// <param name="httpClientFactory">Factory used to create probe HTTP clients.</param>
+    /// <param name="aiClient">AI client used to validate credentials.</param>
     /// <param name="logger">Logger used for validation diagnostics.</param>
     public StartupValidator(
-        IOptions<AnthropicOptions> anthropic,
+        IOptions<AiOptions> ai,
         IOptions<BrowserlessOptions> browserless,
         IOptions<SmtpOptions> smtp,
         AppDbContext db,
         ITalkingPointsApiClient talkingPointsClient,
-        IHttpClientFactory httpClientFactory,
+        IAiClient aiClient,
         ILogger<StartupValidator> logger)
     {
-        _anthropic = anthropic.Value;
+        _ai = ai.Value;
         _browserless = browserless.Value;
         _smtp = smtp.Value;
         _db = db;
         _talkingPointsClient = talkingPointsClient;
-        _httpClientFactory = httpClientFactory;
+        _aiClient = aiClient;
         _logger = logger;
     }
 
@@ -118,7 +118,7 @@ public class StartupValidator
         };
 
         results.Add(await CheckDatabaseAsync(ct));
-        results.Add(await CheckAnthropicApiKeyAsync(ct));
+        results.Add(await CheckAiCredentialsAsync(ct));
         results.Add(await CheckBrowserlessAsync(ct));
         results.Add(await CheckSmtpAsync(ct));
         results.AddRange(await CheckTalkingPointsParentsAsync(ct));
@@ -130,8 +130,8 @@ public class StartupValidator
     {
         var missing = new List<string>();
 
-        if (string.IsNullOrWhiteSpace(_anthropic.ApiKey))
-            missing.Add("Anthropic:ApiKey");
+        if (string.IsNullOrWhiteSpace(_ai.Anthropic.ApiKey))
+            missing.Add("Ai:Anthropic:ApiKey");
         if (string.IsNullOrWhiteSpace(_smtp.Host))
             missing.Add("Smtp:Host");
         if (string.IsNullOrWhiteSpace(_smtp.FromEmail))
@@ -169,50 +169,22 @@ public class StartupValidator
         }
     }
 
-    private async Task<ValidationCheckResult> CheckAnthropicApiKeyAsync(CancellationToken ct)
+    private async Task<ValidationCheckResult> CheckAiCredentialsAsync(CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(_anthropic.ApiKey))
-            return new ValidationCheckResult("Anthropic API key", CheckStatus.Fail, "Anthropic:ApiKey is not set");
+        if (string.IsNullOrWhiteSpace(_ai.Anthropic.ApiKey))
+            return new ValidationCheckResult("AI credentials", CheckStatus.Fail, "Ai:Anthropic:ApiKey is not set");
 
-        try
-        {
-            var client = _httpClientFactory.CreateClient();
-            var request = new HttpRequestMessage(HttpMethod.Post, "https://api.anthropic.com/v1/messages");
-            request.Headers.Add("x-api-key", _anthropic.ApiKey);
-            request.Headers.Add("anthropic-version", "2023-06-01");
-            // Minimal body — we only care whether auth succeeds, not whether the request is valid
-            request.Content = JsonContent.Create(new
-            {
-                model = "claude-haiku-3-5-20241022",
-                max_tokens = 1,
-                messages = Array.Empty<object>()
-            });
-
-            var response = await client.SendAsync(request, ct);
-
-            return response.StatusCode switch
-            {
-                System.Net.HttpStatusCode.Unauthorized =>
-                    new ValidationCheckResult("Anthropic API key", CheckStatus.Fail, "API key rejected (401 Unauthorized)"),
-                System.Net.HttpStatusCode.Forbidden =>
-                    new ValidationCheckResult("Anthropic API key", CheckStatus.Fail, "API key forbidden (403 Forbidden)"),
-                _ =>
-                    new ValidationCheckResult("Anthropic API key", CheckStatus.Pass,
-                        $"Key accepted by API (HTTP {(int)response.StatusCode})")
-            };
-        }
-        catch (Exception ex)
-        {
-            return new ValidationCheckResult("Anthropic API key", CheckStatus.Fail, $"Request failed: {ex.Message}");
-        }
+        var result = await _aiClient.ValidateCredentialsAsync(ct);
+        return result.IsValid
+            ? new ValidationCheckResult("AI credentials", CheckStatus.Pass, result.Reason)
+            : new ValidationCheckResult("AI credentials", CheckStatus.Fail, result.Reason);
     }
 
     private async Task<ValidationCheckResult> CheckBrowserlessAsync(CancellationToken ct)
     {
         try
         {
-            var client = _httpClientFactory.CreateClient();
-            client.Timeout = TimeSpan.FromSeconds(10);
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             var scrapeUrl = _browserless.BaseUrl.TrimEnd('/') + "/scrape";
             using var request = new HttpRequestMessage(HttpMethod.Post, scrapeUrl)
             {

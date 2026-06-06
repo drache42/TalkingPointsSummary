@@ -23,7 +23,8 @@ internal static class WorkerConfiguration
         Delay = TimeSpan.FromSeconds(1)
     };
 
-    public static IConfigurationRoot BuildConfiguration(string basePath, string environmentName)
+    public static (IConfigurationRoot Config, IReadOnlyList<string> DeprecationWarnings) BuildConfiguration(
+        string basePath, string environmentName)
     {
         var builder = new ConfigurationBuilder()
             .SetBasePath(basePath)
@@ -38,7 +39,49 @@ internal static class WorkerConfiguration
 
         builder.AddEnvironmentVariables();
 
-        return builder.Build();
+        // First pass: detect legacy keys and compute promoted values.
+        var intermediate = builder.Build();
+        var (migrations, warnings) = DetectLegacyKeys(intermediate);
+
+        if (migrations.Count == 0)
+        {
+            return (intermediate, []);
+        }
+
+        // Second pass: inject promoted values at highest priority and rebuild.
+        builder.AddInMemoryCollection(migrations);
+        return (builder.Build(), warnings);
+    }
+
+    /// <summary>
+    /// Inspects <paramref name="config"/> for deprecated key names and returns a dictionary
+    /// of promoted values that should be injected under their current names, along with
+    /// human-readable deprecation warnings for each migration that was applied.
+    /// </summary>
+    internal static (Dictionary<string, string?> Migrations, List<string> Warnings) DetectLegacyKeys(
+        IConfiguration config)
+    {
+        var migrations = new Dictionary<string, string?>();
+        var warnings = new List<string>();
+
+        // v1 → v2: Anthropic:ApiKey → Ai:Anthropic:ApiKey
+        var legacyApiKey = config["Anthropic:ApiKey"];
+        if (!string.IsNullOrEmpty(legacyApiKey) && string.IsNullOrEmpty(config["Ai:Anthropic:ApiKey"]))
+        {
+            migrations["Ai:Anthropic:ApiKey"] = legacyApiKey;
+            warnings.Add(
+                "Deprecated config key 'Anthropic:ApiKey' was automatically migrated to 'Ai:Anthropic:ApiKey'. " +
+                "Update your environment variables or secrets to remove this warning.");
+
+            // Default Ai:Provider to Anthropic when we are migrating an Anthropic key
+            // and the caller has not already set a provider.
+            if (string.IsNullOrEmpty(config["Ai:Provider"]))
+            {
+                migrations["Ai:Provider"] = "Anthropic";
+            }
+        }
+
+        return (migrations, warnings);
     }
 
     public static void ConfigureServices(IServiceCollection services, IConfiguration configuration)
@@ -60,8 +103,11 @@ internal static class WorkerConfiguration
                 builder.AddRetry(SharedRetryOptions);
             });
 
-        services.AddHttpClient<IMessageCategorizer, MessageCategorizer>()
-            .AddResilienceHandler("anthropic-categorization-retry", static builder =>
+        services.AddHttpClient<IAiClient, AnthropicAiClient>(client =>
+            {
+                client.Timeout = TimeSpan.FromMinutes(5);
+            })
+            .AddResilienceHandler("anthropic-retry", static builder =>
             {
                 builder.AddRetry(SharedRetryOptions);
             });
@@ -75,20 +121,13 @@ internal static class WorkerConfiguration
                 builder.AddRetry(SharedRetryOptions);
             });
 
-        services.AddHttpClient<ISummaryGenerator, SummaryGenerator>(client =>
-            {
-                client.Timeout = TimeSpan.FromMinutes(5);
-            })
-            .AddResilienceHandler("anthropic-summary-retry", static builder =>
-            {
-                builder.AddRetry(SharedRetryOptions);
-            });
-
         services.AddSingleton<IHostAddressResolver, HostAddressResolver>();
         services.AddScoped<INewsletterUrlValidator, NewsletterUrlValidator>();
         services.AddScoped<IMessageDeduplicator, MessageDeduplicator>();
         services.AddSingleton<IMarkdownConverter, MarkdownConverter>();
         services.AddScoped<IEmailSender, EmailSender>();
+        services.AddScoped<IMessageCategorizer, MessageCategorizer>();
+        services.AddScoped<ISummaryGenerator, SummaryGenerator>();
         services.AddParentChildServices();
         services.AddScoped<PipelineOrchestrator>();
         services.AddSingleton<WeeklyPipelineService>();
@@ -109,7 +148,7 @@ internal static class WorkerConfiguration
 
     public static void EnsureValidatedOptions(IServiceProvider services)
     {
-        _ = services.GetRequiredService<IOptions<AnthropicOptions>>().Value;
+        _ = services.GetRequiredService<IOptions<AiOptions>>().Value;
         _ = services.GetRequiredService<IOptions<BrowserlessOptions>>().Value;
         _ = services.GetRequiredService<IOptions<DebugFeaturesOptions>>().Value;
         _ = services.GetRequiredService<IOptions<NewsletterScrapingSecurityOptions>>().Value;
@@ -120,10 +159,17 @@ internal static class WorkerConfiguration
 
     private static void AddValidatedOptions(IServiceCollection services, IConfiguration configuration)
     {
-        services.AddOptions<AnthropicOptions>()
-            .Bind(configuration.GetSection(AnthropicOptions.SectionName))
+        services.AddOptions<AiOptions>()
+            .Bind(configuration.GetSection(AiOptions.SectionName))
             .ValidateDataAnnotations()
-            .Validate(options => !string.IsNullOrWhiteSpace(options.ApiKey), "Anthropic:ApiKey is required.")
+            .Validate(options => !string.IsNullOrWhiteSpace(options.Provider), "Ai:Provider is required.")
+            .Validate(
+                options => !string.Equals(options.Provider, "Anthropic", StringComparison.OrdinalIgnoreCase)
+                           || !string.IsNullOrWhiteSpace(options.Anthropic.ApiKey),
+                "Ai:Anthropic:ApiKey is required when Ai:Provider is Anthropic.")
+            .Validate(options => !string.IsNullOrWhiteSpace(options.Profiles.Categorization.ModelId), "Ai:Profiles:Categorization:ModelId is required.")
+            .Validate(options => !string.IsNullOrWhiteSpace(options.Profiles.Summarization.ModelId), "Ai:Profiles:Summarization:ModelId is required.")
+            .Validate(options => !string.IsNullOrWhiteSpace(options.Profiles.Validation.ModelId), "Ai:Profiles:Validation:ModelId is required.")
             .ValidateOnStart();
 
         services.AddOptions<BrowserlessOptions>()

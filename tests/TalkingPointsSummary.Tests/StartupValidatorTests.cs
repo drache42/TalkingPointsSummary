@@ -46,16 +46,21 @@ public class StartupValidatorTests : IDisposable
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
 
-        var httpClientFactory = new Mock<IHttpClientFactory>();
-        httpClientFactory.Setup(factory => factory.CreateClient(It.IsAny<string>())).Returns(new HttpClient());
+        var aiClient = new Mock<IAiClient>();
+        aiClient.Setup(c => c.ValidateCredentialsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AiCredentialCheckResult(true, "OK"));
 
         var validator = new StartupValidator(
-            Options.Create(new AnthropicOptions { ApiKey = "test-key" }),
+            Options.Create(new AiOptions
+            {
+                Provider = "Anthropic",
+                Anthropic = new AnthropicProviderOptions { ApiKey = "test-key" }
+            }),
             Options.Create(new BrowserlessOptions { BaseUrl = "http://localhost:3000" }),
             Options.Create(new SmtpOptions { Host = "localhost", Port = 1025, FromEmail = "dev@example.com" }),
             _db,
             talkingPointsClient.Object,
-            httpClientFactory.Object,
+            aiClient.Object,
             NullLogger<StartupValidator>.Instance);
 
         await validator.RunAllChecksAsync();

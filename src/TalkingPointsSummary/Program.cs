@@ -31,7 +31,7 @@ internal sealed class Program
             ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
             ?? Environments.Production;
 
-        var configuration = BuildConfiguration(environmentName);
+        var (configuration, configWarnings) = BuildConfiguration(environmentName);
         var debugFeaturesEnabled = DebugFeaturesOptions.IsEnabled(configuration);
 
         Log.Logger = new LoggerConfiguration()
@@ -48,6 +48,11 @@ internal sealed class Program
                 restrictedToMinimumLevel: LogEventLevel.Debug,
                 outputTemplate: FileOutputTemplate)
             .CreateLogger();
+
+        foreach (var warning in configWarnings)
+        {
+            Log.Warning("[Config] {Warning}", warning);
+        }
 
         try
         {
@@ -75,8 +80,13 @@ internal sealed class Program
         }
     }
 
-    private static IConfiguration BuildConfiguration(string environmentName)
-        => WorkerConfiguration.BuildConfiguration(Directory.GetCurrentDirectory(), environmentName);
+    private static (IConfiguration Configuration, IReadOnlyList<string> DeprecationWarnings) BuildConfiguration(
+        string environmentName)
+    {
+        var (config, warnings) = WorkerConfiguration.BuildConfiguration(
+            Directory.GetCurrentDirectory(), environmentName);
+        return (config, warnings);
+    }
 
     private static bool IsNoisyEfCommandLog(Serilog.Events.LogEvent logEvent)
     {

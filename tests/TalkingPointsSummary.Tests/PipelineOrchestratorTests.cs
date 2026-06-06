@@ -88,8 +88,8 @@ public class PipelineOrchestratorTests : IDisposable
     [Fact]
     public async Task RunAsync_SummaryGeneratorReturnsNull_ReturnsEarlyWithoutEmailOrSave()
     {
-        _mockSummaryGenerator.Setup(x => x.GenerateAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
+        _mockSummaryGenerator.Setup(x => x.BuildPromptAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SummaryPromptResult?)null);
 
         await _orchestrator.RunAsync(_testParent);
 
@@ -121,8 +121,8 @@ public class PipelineOrchestratorTests : IDisposable
             });
         await _db.SaveChangesAsync();
 
-        _mockSummaryGenerator.Setup(x => x.GenerateAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
+        _mockSummaryGenerator.Setup(x => x.BuildPromptAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SummaryPromptResult?)null);
 
         await _orchestrator.RunAsync(_testParent);
 
@@ -154,8 +154,8 @@ public class PipelineOrchestratorTests : IDisposable
         _mockCategorizer.Setup(x => x.CategorizeAsync(It.Is<Message>(m => m.ExternalMessageId == "msg-ok"), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new CategorizationResult { MessageId = "msg-ok", IsNewsItself = true, Summary = "News" });
 
-        _mockSummaryGenerator.Setup(x => x.GenerateAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
+        _mockSummaryGenerator.Setup(x => x.BuildPromptAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SummaryPromptResult?)null);
 
         await _orchestrator.RunAsync(_testParent);
 
@@ -197,8 +197,8 @@ public class PipelineOrchestratorTests : IDisposable
         _mockScraper.Setup(x => x.ScrapeAsync("https://www.smore.com/abc", It.IsAny<CancellationToken>()))
             .ReturnsAsync("Scraped newsletter content");
 
-        _mockSummaryGenerator.Setup(x => x.GenerateAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
+        _mockSummaryGenerator.Setup(x => x.BuildPromptAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SummaryPromptResult?)null);
 
         await _orchestrator.RunAsync(_testParent);
 
@@ -240,8 +240,8 @@ public class PipelineOrchestratorTests : IDisposable
         _mockScraper.Setup(x => x.ScrapeAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string?)null);
 
-        _mockSummaryGenerator.Setup(x => x.GenerateAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
+        _mockSummaryGenerator.Setup(x => x.BuildPromptAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SummaryPromptResult?)null);
 
         await _orchestrator.RunAsync(_testParent);
 
@@ -275,8 +275,8 @@ public class PipelineOrchestratorTests : IDisposable
                 Summary = "Picture day"
             });
 
-        _mockSummaryGenerator.Setup(x => x.GenerateAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
+        _mockSummaryGenerator.Setup(x => x.BuildPromptAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SummaryPromptResult?)null);
 
         await _orchestrator.RunAsync(_testParent);
 
@@ -313,8 +313,8 @@ public class PipelineOrchestratorTests : IDisposable
         _mockScraper.Setup(x => x.ScrapeAsync("https://www.smore.com/abc", It.IsAny<CancellationToken>()))
             .ReturnsAsync("Newsletter details here");
 
-        _mockSummaryGenerator.Setup(x => x.GenerateAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
+        _mockSummaryGenerator.Setup(x => x.BuildPromptAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SummaryPromptResult?)null);
 
         await _orchestrator.RunAsync(_testParent);
 
@@ -336,7 +336,9 @@ public class PipelineOrchestratorTests : IDisposable
         _mockDeduplicator.Setup(x => x.GetUnprocessedAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
 
-        _mockSummaryGenerator.Setup(x => x.GenerateAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+        _mockSummaryGenerator.Setup(x => x.BuildPromptAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SummaryPromptResult("the-prompt", 3));
+        _mockSummaryGenerator.Setup(x => x.ExecutePromptAsync("the-prompt", It.IsAny<CancellationToken>()))
             .ReturnsAsync("# Weekly Summary\nContent here");
 
         _mockMarkdownConverter.Setup(x => x.ToHtml(It.IsAny<string>()))
@@ -352,6 +354,7 @@ public class PipelineOrchestratorTests : IDisposable
 
         var savedSummary = await _db.Summaries.SingleAsync();
         savedSummary.Content.Should().Be("# Weekly Summary\nContent here");
+        savedSummary.Prompt.Should().Be("the-prompt");
         savedSummary.ParentId.Should().Be(_testParent.Id);
         savedSummary.CreatedAt.Should().Be(FixedUtcNow.UtcDateTime);
     }

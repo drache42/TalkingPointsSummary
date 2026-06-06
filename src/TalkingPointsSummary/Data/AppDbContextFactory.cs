@@ -23,7 +23,7 @@ public class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbContext>
             ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
             ?? Environments.Development;
 
-        var configuration = WorkerConfiguration.BuildConfiguration(Directory.GetCurrentDirectory(), environmentName);
+        var (configuration, _) = WorkerConfiguration.BuildConfiguration(Directory.GetCurrentDirectory(), environmentName);
         var connectionString = WorkerConfiguration.GetRequiredConnectionString(configuration);
 
         var options = new DbContextOptionsBuilder<AppDbContext>()

@@ -90,7 +90,7 @@ public sealed class SummaryPromptBuilder
     private static string BuildDateReferenceCalendar(DateTime now)
     {
         var builder = new StringBuilder();
-        for (var i = -7; i <= 14; i++)
+        for (var i = -14; i <= 120; i++)
         {
             var date = now.AddDays(i);
             var formatted = date.ToString("dddd, MMMM d, yyyy", CultureInfo.InvariantCulture);

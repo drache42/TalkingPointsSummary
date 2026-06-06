@@ -1,6 +1,3 @@
-using System.Net.Http.Json;
-using System.Text;
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -11,46 +8,44 @@ using TalkingPointsSummary.Models;
 namespace TalkingPointsSummary.Services;
 
 /// <summary>
-/// Uses Claude Sonnet to generate a weekly parent briefing summary.
+/// Uses the configured AI provider to generate a weekly parent briefing summary.
 /// </summary>
 public class SummaryGenerator : ISummaryGenerator
 {
-    private readonly HttpClient _httpClient;
+    private readonly IAiClient _aiClient;
     private readonly AppDbContext _db;
-    private readonly AnthropicOptions _anthropic;
+    private readonly AiOptions _options;
     private readonly ILogger<SummaryGenerator> _logger;
     private readonly TimeProvider _timeProvider;
     private readonly SummaryPromptBuilder _promptBuilder;
 
     /// <summary>
-    /// Initializes a summary generator that uses Anthropic to draft weekly summaries.
+    /// Initializes a summary generator.
     /// </summary>
-    /// <param name="httpClient">HTTP client used to call Anthropic.</param>
+    /// <param name="aiClient">AI client used to execute prompts.</param>
     /// <param name="db">Database context used to load news, summaries, and children.</param>
-    /// <param name="anthropic">Anthropic API configuration.</param>
+    /// <param name="aiOptions">AI configuration including the summarization profile.</param>
     /// <param name="logger">Logger used for generation diagnostics.</param>
     /// <param name="gradeCalculator">Grade calculator used when building the prompt.</param>
     /// <param name="timeProvider">Optional time provider used to define the summary window.</param>
     public SummaryGenerator(
-        HttpClient httpClient,
+        IAiClient aiClient,
         AppDbContext db,
-        IOptions<AnthropicOptions> anthropic,
+        IOptions<AiOptions> aiOptions,
         ILogger<SummaryGenerator> logger,
         IGradeCalculator gradeCalculator,
         TimeProvider? timeProvider = null)
     {
-        _httpClient = httpClient;
+        _aiClient = aiClient;
         _db = db;
-        _anthropic = anthropic.Value;
+        _options = aiOptions.Value;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _promptBuilder = new SummaryPromptBuilder(gradeCalculator);
     }
 
-    /// <summary>
-    /// Generates a weekly summary for a parent, returning the Markdown content.
-    /// </summary>
-    public async Task<string?> GenerateAsync(Parent parent, CancellationToken ct = default)
+    /// <inheritdoc/>
+    public async Task<SummaryPromptResult?> BuildPromptAsync(Parent parent, CancellationToken ct = default)
     {
         var now = _timeProvider.GetUtcDateTime();
         var sixWeeksAgo = now.AddDays(-42);
@@ -67,7 +62,7 @@ public class SummaryGenerator : ISummaryGenerator
         }
 
         var previousSummaries = await _db.Summaries
-            .Where(s => s.ParentId == parent.Id && s.CreatedAt > sixWeeksAgo)
+            .Where(s => s.ParentId == parent.Id && s.CreatedAt > sixWeeksAgo && s.Content != null)
             .OrderByDescending(s => s.CreatedAt)
             .ToListAsync(ct);
 
@@ -76,36 +71,24 @@ public class SummaryGenerator : ISummaryGenerator
             .ToListAsync(ct);
 
         var prompt = _promptBuilder.Build(now, children, newsItems, previousSummaries);
+        return new SummaryPromptResult(prompt, newsItems.Count);
+    }
 
-        _logger.LogInformation("Generating summary for parent {ParentName} with {NewsCount} news items",
-            parent.Name, newsItems.Count);
+    /// <inheritdoc/>
+    public async Task<string?> ExecutePromptAsync(string prompt, CancellationToken ct = default)
+    {
+        var profile = _options.Profiles.Summarization;
 
-        var requestBody = new
-        {
-            model = "claude-sonnet-4-5-20250929",
-            max_tokens = 8192,
-            messages = new[]
-            {
-                new { role = "user", content = prompt }
-            }
-        };
+        _logger.LogInformation("Executing summary prompt via AI (model: {Model}, maxTokens: {MaxTokens})",
+            profile.ModelId, profile.MaxTokens);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, "https://api.anthropic.com/v1/messages");
-    request.Headers.Add("x-api-key", _anthropic.ApiKey);
-        request.Headers.Add("anthropic-version", "2023-06-01");
-        request.Content = JsonContent.Create(requestBody);
+        var result = await _aiClient.CompleteAsync(
+            new AiCompletionRequest(prompt, profile.ModelId, profile.MaxTokens), ct);
 
-        var response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        var markdown = result.Text;
 
-        var apiResponse = await response.Content.ReadFromJsonAsync<AnthropicResponse>(
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }, ct);
+        _logger.LogInformation("AI returned summary: {Length} chars", markdown.Length);
 
-        var markdown = apiResponse?.Content?.FirstOrDefault()?.Text;
-
-        _logger.LogInformation("Generated summary for parent {ParentName}: {Length} chars",
-            parent.Name, markdown?.Length ?? 0);
-
-        return markdown;
+        return string.IsNullOrEmpty(markdown) ? null : markdown;
     }
 }

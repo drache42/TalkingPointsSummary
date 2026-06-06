@@ -249,9 +249,16 @@ public class IntegrationTestFixture : IAsyncLifetime
     {
         var services = new ServiceCollection();
 
-        services.AddSingleton(Options.Create(new AnthropicOptions
+        services.AddSingleton(Options.Create(new AiOptions
         {
-            ApiKey = "test-anthropic-key",
+            Provider = "Anthropic",
+            Anthropic = new AnthropicProviderOptions { ApiKey = "test-anthropic-key" },
+            Profiles = new AiProfilesOptions
+            {
+                Categorization = new AiProfileOptions { ModelId = "claude-haiku-4-5-20251001", MaxTokens = 1024 },
+                Summarization = new AiProfileOptions { ModelId = "claude-sonnet-4-5-20250929", MaxTokens = 8192 },
+                Validation = new AiProfileOptions { ModelId = "claude-haiku-3-5-20241022", MaxTokens = 1 }
+            }
         }));
         services.AddSingleton(Options.Create(new BrowserlessOptions
         {
@@ -290,7 +297,7 @@ public class IntegrationTestFixture : IAsyncLifetime
         services.AddHttpClient<ITalkingPointsApiClient, TalkingPointsApiClient>()
             .AddHttpMessageHandler(() => new UrlRewritingHandler(wireMockUri));
 
-        services.AddHttpClient<IMessageCategorizer, MessageCategorizer>()
+        services.AddHttpClient<IAiClient, AnthropicAiClient>()
             .AddHttpMessageHandler(() => new UrlRewritingHandler(wireMockUri));
 
         services.AddHttpClient<INewsletterScraper, NewsletterScraper>(client =>
@@ -298,14 +305,13 @@ public class IntegrationTestFixture : IAsyncLifetime
             client.Timeout = TimeSpan.FromSeconds(90);
         });
 
-        services.AddHttpClient<ISummaryGenerator, SummaryGenerator>()
-            .AddHttpMessageHandler(() => new UrlRewritingHandler(wireMockUri));
-
         services.AddSingleton<IHostAddressResolver, HostAddressResolver>();
         services.AddScoped<INewsletterUrlValidator, NewsletterUrlValidator>();
         services.AddScoped<IMessageDeduplicator, MessageDeduplicator>();
         services.AddSingleton<IMarkdownConverter, MarkdownConverter>();
         services.AddScoped<IEmailSender, EmailSender>();
+        services.AddScoped<IMessageCategorizer, MessageCategorizer>();
+        services.AddScoped<ISummaryGenerator, SummaryGenerator>();
         services.AddParentChildServices();
         services.AddScoped<PipelineOrchestrator>();
         services.AddSingleton<WeeklyPipelineService>();
