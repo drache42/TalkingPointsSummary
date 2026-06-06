@@ -41,47 +41,16 @@ internal static class WorkerConfiguration
 
         // First pass: detect legacy keys and compute promoted values.
         var intermediate = builder.Build();
-        var (migrations, warnings) = DetectLegacyKeys(intermediate);
+        var (promoted, warnings) = ConfigMigrationRunner.Run(intermediate, ConfigKeyMigrations.All);
 
-        if (migrations.Count == 0)
+        if (promoted.Count == 0)
         {
             return (intermediate, []);
         }
 
         // Second pass: inject promoted values at highest priority and rebuild.
-        builder.AddInMemoryCollection(migrations);
+        builder.AddInMemoryCollection(promoted);
         return (builder.Build(), warnings);
-    }
-
-    /// <summary>
-    /// Inspects <paramref name="config"/> for deprecated key names and returns a dictionary
-    /// of promoted values that should be injected under their current names, along with
-    /// human-readable deprecation warnings for each migration that was applied.
-    /// </summary>
-    internal static (Dictionary<string, string?> Migrations, List<string> Warnings) DetectLegacyKeys(
-        IConfiguration config)
-    {
-        var migrations = new Dictionary<string, string?>();
-        var warnings = new List<string>();
-
-        // v1 → v2: Anthropic:ApiKey → Ai:Anthropic:ApiKey
-        var legacyApiKey = config["Anthropic:ApiKey"];
-        if (!string.IsNullOrEmpty(legacyApiKey) && string.IsNullOrEmpty(config["Ai:Anthropic:ApiKey"]))
-        {
-            migrations["Ai:Anthropic:ApiKey"] = legacyApiKey;
-            warnings.Add(
-                "Deprecated config key 'Anthropic:ApiKey' was automatically migrated to 'Ai:Anthropic:ApiKey'. " +
-                "Update your environment variables or secrets to remove this warning.");
-
-            // Default Ai:Provider to Anthropic when we are migrating an Anthropic key
-            // and the caller has not already set a provider.
-            if (string.IsNullOrEmpty(config["Ai:Provider"]))
-            {
-                migrations["Ai:Provider"] = "Anthropic";
-            }
-        }
-
-        return (migrations, warnings);
     }
 
     public static void ConfigureServices(IServiceCollection services, IConfiguration configuration)

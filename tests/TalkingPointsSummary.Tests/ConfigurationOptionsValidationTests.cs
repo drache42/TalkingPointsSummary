@@ -178,97 +178,15 @@ public class ConfigurationOptionsValidationTests
             .AddInMemoryCollection(values)
             .Build();
 
-        var (migrations, _) = WorkerConfiguration.DetectLegacyKeys(intermediate);
+        var (promoted, _) = ConfigMigrationRunner.Run(intermediate, ConfigKeyMigrations.All);
 
         var configBuilder = new ConfigurationBuilder().AddInMemoryCollection(values);
-        if (migrations.Count > 0)
-            configBuilder.AddInMemoryCollection(migrations);
+        if (promoted.Count > 0)
+            configBuilder.AddInMemoryCollection(promoted);
 
         var services = new ServiceCollection();
         WorkerConfiguration.ConfigureServices(services, configBuilder.Build());
         return services.BuildServiceProvider();
-    }
-
-    // ── DetectLegacyKeys unit tests ──────────────────────────────────────────
-
-    [Fact]
-    public void DetectLegacyKeys_LegacyKeySetNewKeyAbsent_MigratesAndWarns()
-    {
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["Anthropic:ApiKey"] = "sk-legacy" })
-            .Build();
-
-        var (migrations, warnings) = WorkerConfiguration.DetectLegacyKeys(config);
-
-        migrations.Should().ContainKey("Ai:Anthropic:ApiKey").WhoseValue.Should().Be("sk-legacy");
-        migrations.Should().ContainKey("Ai:Provider").WhoseValue.Should().Be("Anthropic");
-        warnings.Should().HaveCount(1);
-        warnings[0].Should().Contain("Anthropic:ApiKey").And.Contain("Ai:Anthropic:ApiKey");
-    }
-
-    [Fact]
-    public void DetectLegacyKeys_NewKeyAlreadySet_NoMigration()
-    {
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Anthropic:ApiKey"] = "sk-old",
-                ["Ai:Anthropic:ApiKey"] = "sk-new",
-                ["Ai:Provider"] = "Anthropic"
-            })
-            .Build();
-
-        var (migrations, warnings) = WorkerConfiguration.DetectLegacyKeys(config);
-
-        migrations.Should().BeEmpty();
-        warnings.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void DetectLegacyKeys_NeitherKeySet_NoMigration()
-    {
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
-            .Build();
-
-        var (migrations, warnings) = WorkerConfiguration.DetectLegacyKeys(config);
-
-        migrations.Should().BeEmpty();
-        warnings.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void DetectLegacyKeys_OnlyNewKeySet_NoMigration()
-    {
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Ai:Anthropic:ApiKey"] = "sk-new",
-                ["Ai:Provider"] = "Anthropic"
-            })
-            .Build();
-
-        var (migrations, warnings) = WorkerConfiguration.DetectLegacyKeys(config);
-
-        migrations.Should().BeEmpty();
-        warnings.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void DetectLegacyKeys_LegacyKeySet_AiProviderAlreadySet_DoesNotOverwriteProvider()
-    {
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Anthropic:ApiKey"] = "sk-legacy",
-                ["Ai:Provider"] = "CustomProvider"
-            })
-            .Build();
-
-        var (migrations, warnings) = WorkerConfiguration.DetectLegacyKeys(config);
-
-        migrations.Should().ContainKey("Ai:Anthropic:ApiKey");
-        migrations.Should().NotContainKey("Ai:Provider");
     }
 
     // ── End-to-end migration pipeline test ───────────────────────────────────
