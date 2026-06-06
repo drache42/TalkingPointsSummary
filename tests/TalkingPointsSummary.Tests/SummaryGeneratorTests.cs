@@ -39,6 +39,7 @@ public class SummaryGeneratorTests : IDisposable
             _mockAiClient.Object,
             _db,
             Options.Create(_aiOptions),
+            Options.Create(new PipelineScheduleOptions()),
             NullLogger<SummaryGenerator>.Instance,
             new GradeCalculator(),
             timeProvider);

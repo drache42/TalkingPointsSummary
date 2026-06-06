@@ -131,9 +131,9 @@ public class SummaryPromptBuilderTests
     /// Verifies that all supported template tokens are replaced during prompt generation.
     /// </summary>
     [Fact]
-    public void Build_AllEightTokensAreReplaced()
+    public void Build_AllNineTokensAreReplaced()
     {
-        var template = "{{TODAY}}|{{WEEK_CALENDAR}}|{{CONTEXT}}|{{RECENT_NEWS}}|{{PREVIOUS_SUMMARIES}}|{{SCHOOL_WIDE_SECTIONS}}|{{CHILD_SECTIONS}}|{{SCHOOL_DATE_SECTIONS}}";
+        var template = "{{TODAY}}|{{SUMMARY_TITLE}}|{{WEEK_CALENDAR}}|{{CONTEXT}}|{{RECENT_NEWS}}|{{PREVIOUS_SUMMARIES}}|{{SCHOOL_WIDE_SECTIONS}}|{{CHILD_SECTIONS}}|{{SCHOOL_DATE_SECTIONS}}";
         var builder = new SummaryPromptBuilder(template);
 
         var children = new List<Child>
@@ -159,5 +159,39 @@ public class SummaryPromptBuilderTests
         prompt.Should().Contain("Monday, March 2, 2026");   // -7 days (start)
         prompt.Should().Contain("Monday, March 9, 2026");   // today
         prompt.Should().Contain("Monday, March 23, 2026");  // +14 days (end)
+    }
+
+    /// <summary>
+    /// Verifies that {{SUMMARY_TITLE}} is replaced with a heading that contains the formatted date.
+    /// </summary>
+    [Fact]
+    public void Build_SummaryTitle_ContainsFormattedDate()
+    {
+        var builder = new SummaryPromptBuilder("{{SUMMARY_TITLE}}");
+        var now = new DateTime(2026, 5, 24, 8, 0, 0, DateTimeKind.Unspecified); // local Sunday
+
+        var prompt = builder.Build(now, [], [], []);
+
+        prompt.Should().NotContain("{{SUMMARY_TITLE}}");
+        prompt.Should().Contain("Sunday, May 24, 2026");
+    }
+
+    /// <summary>
+    /// Verifies that {{TODAY}} and {{SUMMARY_TITLE}} reflect the date of the supplied local datetime,
+    /// not a different date. This matters because SummaryGenerator converts UTC to the configured local timezone
+    /// before calling Build(), so the prompt must faithfully forward whatever date it receives.
+    /// </summary>
+    [Theory]
+    [InlineData(2026, 5, 24, "Sunday, May 24, 2026")]    // Sunday — typical prod run day
+    [InlineData(2026, 5, 25, "Monday, May 25, 2026")]    // Monday
+    [InlineData(2026, 9, 1,  "Tuesday, September 1, 2026")] // September boundary (grade year edge)
+    public void Build_TodayAndTitle_ReflectSuppliedDate(int year, int month, int day, string expectedDayDate)
+    {
+        var builder = new SummaryPromptBuilder("{{TODAY}}|{{SUMMARY_TITLE}}");
+        var now = new DateTime(year, month, day, 8, 0, 0, DateTimeKind.Unspecified);
+
+        var prompt = builder.Build(now, [], [], []);
+
+        prompt.Should().Contain(expectedDayDate);
     }
 }
