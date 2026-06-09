@@ -58,6 +58,8 @@ internal sealed class AnthropicAiClient : IAiClient
         {
             model = _options.Profiles.Validation.ModelId,
             max_tokens = 1,
+            // Intentionally empty: Anthropic validates the API key before the request body,
+            // so a valid key returns 400 (bad request) rather than 200, which is the expected probe response.
             messages = Array.Empty<object>()
         };
 
@@ -81,9 +83,13 @@ internal sealed class AnthropicAiClient : IAiClient
                     new AiCredentialCheckResult(true, false, $"Credentials accepted (HTTP {status})")
             };
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
-            return new AiCredentialCheckResult(false, false, $"Request failed: {ex.Message}");
+            return new AiCredentialCheckResult(false, true, $"Probe failed, key validity inconclusive: {ex.Message}");
         }
     }
 

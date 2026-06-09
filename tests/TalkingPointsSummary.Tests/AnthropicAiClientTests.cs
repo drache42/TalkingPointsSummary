@@ -163,7 +163,7 @@ public class AnthropicAiClientTests
     }
 
     [Fact]
-    public async Task ValidateCredentialsAsync_NetworkException_ReturnsInvalid()
+    public async Task ValidateCredentialsAsync_NetworkException_ReturnsInconclusive()
     {
         var mock = new Mock<HttpMessageHandler>();
         mock.Protected()
@@ -177,6 +177,36 @@ public class AnthropicAiClientTests
         var result = await client.ValidateCredentialsAsync();
 
         result.IsValid.Should().BeFalse();
+        result.IsInconclusive.Should().BeTrue();
         result.Reason.Should().Contain("Connection refused");
+    }
+
+    [Fact]
+    public async Task ValidateCredentialsAsync_TooManyRequests_ReturnsInconclusive()
+    {
+        var handler = CreateMockHandler(HttpStatusCode.TooManyRequests, "{}");
+        var client = CreateClient(handler.Object);
+
+        var result = await client.ValidateCredentialsAsync();
+
+        result.IsValid.Should().BeFalse();
+        result.IsInconclusive.Should().BeTrue();
+        result.Reason.Should().Contain("429");
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.BadGateway)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    public async Task ValidateCredentialsAsync_ServerError_ReturnsInconclusive(HttpStatusCode statusCode)
+    {
+        var handler = CreateMockHandler(statusCode, "{}");
+        var client = CreateClient(handler.Object);
+
+        var result = await client.ValidateCredentialsAsync();
+
+        result.IsValid.Should().BeFalse();
+        result.IsInconclusive.Should().BeTrue();
+        result.Reason.Should().Contain(((int)statusCode).ToString());
     }
 }
