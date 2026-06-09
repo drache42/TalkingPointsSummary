@@ -1,10 +1,8 @@
-using System.Net;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
-using Moq.Protected;
 using TalkingPointsSummary.Configuration;
 using TalkingPointsSummary.Models;
 using TalkingPointsSummary.Services;
@@ -24,34 +22,25 @@ public class MessageCategorizerTests
         SentAt = new DateTime(2026, 3, 7, 10, 0, 0, DateTimeKind.Utc)
     };
 
-    private static MessageCategorizer CreateCategorizer(HttpMessageHandler handler)
+    private static MessageCategorizer CreateCategorizer(Mock<IAiClient> mockAiClient)
     {
-        var httpClient = new HttpClient(handler);
-        var options = Options.Create(new AnthropicOptions { ApiKey = "test-key" });
-        return new MessageCategorizer(httpClient, options, NullLogger<MessageCategorizer>.Instance);
+        var options = Options.Create(new AiOptions
+        {
+            Provider = "Anthropic",
+            Profiles = new AiProfilesOptions
+            {
+                Categorization = new AiProfileOptions { ModelId = "claude-haiku-4-5-20251001", MaxTokens = 1024 }
+            }
+        });
+        return new MessageCategorizer(mockAiClient.Object, options, NullLogger<MessageCategorizer>.Instance);
     }
 
-    private static Mock<HttpMessageHandler> CreateMockHandler(string responseJson)
+    private static Mock<IAiClient> CreateMockAiClient(string responseText)
     {
-        var anthropicResponse = new
-        {
-            content = new[] { new { type = "text", text = responseJson } }
-        };
-
-        var mockHandler = new Mock<HttpMessageHandler>();
-        mockHandler.Protected()
-            .Setup<Task<HttpResponseMessage>>("SendAsync",
-                ItExpr.IsAny<HttpRequestMessage>(),
-                ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage
-            {
-                StatusCode = HttpStatusCode.OK,
-                Content = new StringContent(
-                    JsonSerializer.Serialize(anthropicResponse),
-                    System.Text.Encoding.UTF8, "application/json")
-            });
-
-        return mockHandler;
+        var mock = new Mock<IAiClient>();
+        mock.Setup(c => c.CompleteAsync(It.IsAny<AiCompletionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AiCompletionResult(responseText));
+        return mock;
     }
 
     [Fact]
@@ -67,8 +56,8 @@ public class MessageCategorizerTests
             }
             """;
 
-        var mockHandler = CreateMockHandler(json);
-        var categorizer = CreateCategorizer(mockHandler.Object);
+        var mock = CreateMockAiClient(json);
+        var categorizer = CreateCategorizer(mock);
 
         var result = await categorizer.CategorizeAsync(_testMessage);
 
@@ -93,8 +82,8 @@ public class MessageCategorizerTests
             ```
             """;
 
-        var mockHandler = CreateMockHandler(json);
-        var categorizer = CreateCategorizer(mockHandler.Object);
+        var mock = CreateMockAiClient(json);
+        var categorizer = CreateCategorizer(mock);
 
         var result = await categorizer.CategorizeAsync(_testMessage);
 
@@ -105,13 +94,28 @@ public class MessageCategorizerTests
     [Fact]
     public async Task CategorizeAsync_MalformedJson_ReturnsFallbackResult()
     {
-        var mockHandler = CreateMockHandler("not valid json at all {{{");
-        var categorizer = CreateCategorizer(mockHandler.Object);
+        var mock = CreateMockAiClient("not valid json at all {{{");
+        var categorizer = CreateCategorizer(mock);
 
         var result = await categorizer.CategorizeAsync(_testMessage);
 
         result.IsNewsItself.Should().BeTrue();
         result.HasNewsletterUrl.Should().BeFalse();
         result.Summary.Should().Be("Unable to categorize");
+    }
+
+    [Fact]
+    public async Task CategorizeAsync_UsesCategorizationProfile()
+    {
+        var mock = CreateMockAiClient("{}");
+        var categorizer = CreateCategorizer(mock);
+
+        await categorizer.CategorizeAsync(_testMessage);
+
+        mock.Verify(c => c.CompleteAsync(
+            It.Is<AiCompletionRequest>(r =>
+                r.ModelId == "claude-haiku-4-5-20251001" &&
+                r.MaxTokens == 1024),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 }

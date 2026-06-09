@@ -106,32 +106,43 @@ public class PipelineOrchestrator
                 await ProcessMessageAsync(parent, message, ct);
             }
 
-            // Step 5: Generate weekly summary
-            var markdown = await _summaryGenerator.GenerateAsync(parent, ct);
-            if (markdown == null)
+            // Step 5: Build summary prompt
+            var promptResult = await _summaryGenerator.BuildPromptAsync(parent, ct);
+            if (promptResult == null)
             {
                 _logger.LogInformation("No summary generated for parent {ParentName} (no news items)", parent.Name);
                 return;
             }
 
-            // Step 6: Convert to HTML
-            var html = _markdownConverter.ToHtml(markdown);
+            // Step 6: Persist prompt row before AI call so it is always saved
+            var summary = new Summary
+            {
+                ParentId = parent.Id,
+                Prompt = promptResult.Prompt,
+                Content = null,
+                CreatedAt = _timeProvider.GetUtcDateTime()
+            };
+            _db.Summaries.Add(summary);
+            await _db.SaveChangesAsync(ct);
 
-            // Step 7: Send email
+            // Step 7: Execute AI to produce Markdown
+            var markdown = await _summaryGenerator.ExecutePromptAsync(promptResult.Prompt, ct);
+            if (string.IsNullOrEmpty(markdown))
+            {
+                _logger.LogWarning("AI returned empty summary for parent {ParentName}; prompt row saved for debugging", parent.Name);
+                return;
+            }
+
+            // Step 8: Convert to HTML and send email
+            var html = _markdownConverter.ToHtml(markdown);
             await _emailSender.SendAsync(
                 parent.EmailRecipients,
                 "Talking Points Summary",
                 html,
                 ct);
 
-            // Step 8: Archive the summary
-            var summary = new Summary
-            {
-                ParentId = parent.Id,
-                Content = markdown,
-                CreatedAt = _timeProvider.GetUtcDateTime()
-            };
-            _db.Summaries.Add(summary);
+            // Step 9: Update summary row with generated content
+            summary.Content = markdown;
             await _db.SaveChangesAsync(ct);
 
             _logger.LogInformation("=== Pipeline completed for parent: {ParentName} ===", parent.Name);

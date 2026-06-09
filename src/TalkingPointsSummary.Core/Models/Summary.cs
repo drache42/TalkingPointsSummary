@@ -16,9 +16,16 @@ public class Summary
     public int ParentId { get; set; }
 
     /// <summary>
-    /// The full Markdown summary content.
+    /// The AI prompt used to generate this summary. Persisted before the AI call
+    /// so it is available for debugging even when generation fails.
     /// </summary>
-    public string Content { get; set; } = string.Empty;
+    public string? Prompt { get; set; }
+
+    /// <summary>
+    /// The full Markdown summary content. Null while generation is in progress
+    /// or when the AI call failed after the prompt was saved.
+    /// </summary>
+    public string? Content { get; set; }
 
     /// <summary>
     /// UTC time when the summary was created.

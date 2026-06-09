@@ -1,4 +1,3 @@
-using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
@@ -40,34 +39,34 @@ public class CategorizationResult
 }
 
 /// <summary>
-/// Uses Claude Haiku to categorize messages as newsletter links, direct news, or neither.
+/// Uses the configured AI provider to categorize messages as newsletter links, direct news, or neither.
 /// </summary>
 public partial class MessageCategorizer : IMessageCategorizer
 {
     private static readonly MessageCategorizationPromptBuilder PromptBuilder = new();
 
-    private readonly HttpClient _httpClient;
-    private readonly AnthropicOptions _anthropic;
+    private readonly IAiClient _aiClient;
+    private readonly AiOptions _options;
     private readonly ILogger<MessageCategorizer> _logger;
 
     /// <summary>
-    /// Initializes a message categorizer that calls Anthropic.
+    /// Initializes a message categorizer.
     /// </summary>
-    /// <param name="httpClient">HTTP client used to call Anthropic.</param>
-    /// <param name="anthropic">Anthropic API configuration.</param>
+    /// <param name="aiClient">AI client used to send categorization requests.</param>
+    /// <param name="aiOptions">AI configuration including the categorization profile.</param>
     /// <param name="logger">Logger used for categorization diagnostics.</param>
     public MessageCategorizer(
-        HttpClient httpClient,
-        IOptions<AnthropicOptions> anthropic,
+        IAiClient aiClient,
+        IOptions<AiOptions> aiOptions,
         ILogger<MessageCategorizer> logger)
     {
-        _httpClient = httpClient;
-        _anthropic = anthropic.Value;
+        _aiClient = aiClient;
+        _options = aiOptions.Value;
         _logger = logger;
     }
 
     /// <summary>
-    /// Categorizes a stored message using Anthropic and normalizes the response.
+    /// Categorizes a stored message using the AI provider and normalizes the response.
     /// </summary>
     /// <param name="message">Message to categorize.</param>
     /// <param name="ct">Token used to cancel the request.</param>
@@ -77,32 +76,12 @@ public partial class MessageCategorizer : IMessageCategorizer
             message.ExternalMessageId, message.FromName);
 
         var prompt = PromptBuilder.Build(message);
+        var profile = _options.Profiles.Categorization;
 
-        var requestBody = new
-        {
-            model = _anthropic.CategorizationModel,
-            max_tokens = 1024,
-            messages = new[]
-            {
-                new { role = "user", content = prompt }
-            }
-        };
+        var aiResult = await _aiClient.CompleteAsync(
+            new AiCompletionRequest(prompt, profile.ModelId, profile.MaxTokens), ct);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, "https://api.anthropic.com/v1/messages");
-    request.Headers.Add("x-api-key", _anthropic.ApiKey);
-        request.Headers.Add("anthropic-version", "2023-06-01");
-        request.Content = JsonContent.Create(requestBody);
-
-        var response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
-
-        var apiResponse = await response.Content.ReadFromJsonAsync<AnthropicResponse>(
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }, ct);
-
-        var text = apiResponse?.Content?.FirstOrDefault()?.Text ?? "{}";
-
-        // Strip markdown code fences if present
-        text = StripCodeFences().Replace(text, "").Trim();
+        var text = StripCodeFences().Replace(aiResult.Text, "").Trim();
 
         try
         {
