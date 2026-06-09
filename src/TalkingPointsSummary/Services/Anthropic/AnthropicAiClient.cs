@@ -66,19 +66,24 @@ internal sealed class AnthropicAiClient : IAiClient
         try
         {
             var response = await _httpClient.SendAsync(httpRequest, ct);
+            var status = (int)response.StatusCode;
             return response.StatusCode switch
             {
                 HttpStatusCode.Unauthorized =>
-                    new AiCredentialCheckResult(false, "API key rejected (401 Unauthorized)"),
+                    new AiCredentialCheckResult(false, false, "API key rejected (401 Unauthorized)"),
                 HttpStatusCode.Forbidden =>
-                    new AiCredentialCheckResult(false, "API key forbidden (403 Forbidden)"),
+                    new AiCredentialCheckResult(false, false, "API key forbidden (403 Forbidden)"),
+                HttpStatusCode.TooManyRequests =>
+                    new AiCredentialCheckResult(false, true, $"Rate limited or quota exceeded (429) -- key validity inconclusive"),
+                _ when status >= 500 =>
+                    new AiCredentialCheckResult(false, true, $"Server error (HTTP {status}) -- key validity inconclusive"),
                 _ =>
-                    new AiCredentialCheckResult(true, $"Credentials accepted (HTTP {(int)response.StatusCode})")
+                    new AiCredentialCheckResult(true, false, $"Credentials accepted (HTTP {status})")
             };
         }
         catch (Exception ex)
         {
-            return new AiCredentialCheckResult(false, $"Request failed: {ex.Message}");
+            return new AiCredentialCheckResult(false, false, $"Request failed: {ex.Message}");
         }
     }
 

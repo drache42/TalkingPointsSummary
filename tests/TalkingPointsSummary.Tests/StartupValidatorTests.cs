@@ -48,7 +48,7 @@ public class StartupValidatorTests : IDisposable
 
         var aiClient = new Mock<IAiClient>();
         aiClient.Setup(c => c.ValidateCredentialsAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AiCredentialCheckResult(true, "OK"));
+            .ReturnsAsync(new AiCredentialCheckResult(true, false, "OK"));
 
         var validator = new StartupValidator(
             Options.Create(new AiOptions

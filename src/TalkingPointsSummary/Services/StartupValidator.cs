@@ -175,9 +175,8 @@ public class StartupValidator
             return new ValidationCheckResult("AI credentials", CheckStatus.Fail, "Ai:Anthropic:ApiKey is not set");
 
         var result = await _aiClient.ValidateCredentialsAsync(ct);
-        return result.IsValid
-            ? new ValidationCheckResult("AI credentials", CheckStatus.Pass, result.Reason)
-            : new ValidationCheckResult("AI credentials", CheckStatus.Fail, result.Reason);
+        var status = result.IsInconclusive ? CheckStatus.Warn : result.IsValid ? CheckStatus.Pass : CheckStatus.Fail;
+        return new ValidationCheckResult("AI credentials", status, result.Reason);
     }
 
     private async Task<ValidationCheckResult> CheckBrowserlessAsync(CancellationToken ct)

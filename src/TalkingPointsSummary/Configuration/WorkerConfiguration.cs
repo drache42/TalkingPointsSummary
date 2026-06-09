@@ -133,9 +133,11 @@ internal static class WorkerConfiguration
             .ValidateDataAnnotations()
             .Validate(options => !string.IsNullOrWhiteSpace(options.Provider), "Ai:Provider is required.")
             .Validate(
-                options => !string.Equals(options.Provider, "Anthropic", StringComparison.OrdinalIgnoreCase)
-                           || !string.IsNullOrWhiteSpace(options.Anthropic.ApiKey),
-                "Ai:Anthropic:ApiKey is required when Ai:Provider is Anthropic.")
+                options => string.Equals(options.Provider, "Anthropic", StringComparison.OrdinalIgnoreCase),
+                "Ai:Provider must be 'Anthropic'. No other providers are supported yet.")
+            .Validate(
+                options => !string.IsNullOrWhiteSpace(options.Anthropic.ApiKey),
+                "Ai:Anthropic:ApiKey is required.")
             .Validate(options => !string.IsNullOrWhiteSpace(options.Profiles.Categorization.ModelId), "Ai:Profiles:Categorization:ModelId is required.")
             .Validate(options => !string.IsNullOrWhiteSpace(options.Profiles.Summarization.ModelId), "Ai:Profiles:Summarization:ModelId is required.")
             .Validate(options => !string.IsNullOrWhiteSpace(options.Profiles.Validation.ModelId), "Ai:Profiles:Validation:ModelId is required.")
