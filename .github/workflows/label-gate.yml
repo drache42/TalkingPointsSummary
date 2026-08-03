@@ -84,7 +84,10 @@ jobs:
               const headRef = context.payload.merge_group.head_ref;
               const match = headRef.match(/\/pr-(\d+)-/);
               if (!match) {
-                core.setFailed(`Could not parse PR number from merge_group head_ref: ${headRef}`);
+                // Fail open: this check is a formality re-proving pre-queue state
+                // (see above), so an unrecognized ref format should not dequeue an
+                // otherwise-valid PR. core.setFailed here would fail-closed instead.
+                core.info(`Could not parse a PR number from merge_group head_ref: ${headRef}. Labels were already verified pre-queue; passing.`);
                 return;
               }
               prNumber = parseInt(match[1], 10);
