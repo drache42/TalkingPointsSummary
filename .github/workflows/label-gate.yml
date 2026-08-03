@@ -81,7 +81,7 @@ jobs:
               // left undefined here: checks.create() is only used on the workflow_run
               // path below; if this path ever needs an explicit check run, use
               // context.payload.merge_group.head_sha.
-              const headRef = context.payload.merge_group.head_ref;
+              const headRef = context.payload.merge_group?.head_ref ?? '';
               const match = headRef.match(/\/pr-(\d+)-/);
               if (!match) {
                 // Fail open: this check is a formality re-proving pre-queue state
