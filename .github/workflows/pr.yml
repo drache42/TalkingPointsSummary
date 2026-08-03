@@ -4,9 +4,13 @@ on:
   pull_request:
     branches:
       - main
+  # No branches filter: for merge_group events the matchable ref is the
+  # temporary queue ref (gh-readonly-queue/main/pr-N-<sha>), not the base
+  # branch, so branches: [main] risks never matching and silently hanging
+  # every queue entry until check_response_timeout_minutes expires. A merge
+  # queue only exists on branches where the ruleset enables it, so scoping
+  # here would not add anything anyway.
   merge_group:
-    branches:
-      - main
     types: [checks_requested]
 
 permissions:

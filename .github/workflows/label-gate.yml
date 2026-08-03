@@ -18,9 +18,13 @@ on:
   # already checked pre-queue, but the queue re-runs every required check
   # against its temporary merge ref, so this must report there too or the
   # queue entry hangs until check_response_timeout_minutes expires.
+  # No branches filter: for merge_group events the matchable ref is the
+  # temporary queue ref (gh-readonly-queue/main/pr-N-<sha>), not the base
+  # branch, so branches: [main] risks never matching and silently hanging
+  # every queue entry until check_response_timeout_minutes expires. A merge
+  # queue only exists on branches where the ruleset enables it, so scoping
+  # here would not add anything anyway.
   merge_group:
-    branches:
-      - main
     types: [checks_requested]
 
 permissions:
@@ -97,11 +101,24 @@ jobs:
               prNumber = context.issue.number;
             }
 
-            const { data: labels } = await github.rest.issues.listLabelsOnIssue({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-            });
+            let labels;
+            try {
+              ({ data: labels } = await github.rest.issues.listLabelsOnIssue({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+              }));
+            } catch (err) {
+              // Same fail-open reasoning as the parse guard above: on merge_group,
+              // this check is a formality re-proving state already verified
+              // pre-queue, so a 404 (PR closed/deleted between enqueue and queue
+              // run) or a transient API error should not dequeue a valid PR.
+              if (context.eventName === 'merge_group') {
+                core.info(`Could not read labels for #${prNumber} (${err.status}). Labels were already verified pre-queue; passing.`);
+                return;
+              }
+              throw err;
+            }
 
             const allLabelNames = labels.map(l => l.name);
             const hasSkipRelease = allLabelNames.includes('skip-release');
