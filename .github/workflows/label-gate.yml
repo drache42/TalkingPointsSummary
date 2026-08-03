@@ -19,6 +19,8 @@ on:
   # against its temporary merge ref, so this must report there too or the
   # queue entry hangs until check_response_timeout_minutes expires.
   merge_group:
+    branches:
+      - main
     types: [checks_requested]
 
 permissions:

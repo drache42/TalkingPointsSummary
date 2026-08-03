@@ -331,6 +331,18 @@ jobs:
         shell: pwsh
 
     steps:
+      # Pinned to the default branch: workflow_dispatch can target an
+      # arbitrary branch, and this job is minimal-trust (webhook secret
+      # in scope), so it shouldn't execute script content from whatever
+      # ref triggered the run.
+      - name: Check out notification script
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Post failure notification
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

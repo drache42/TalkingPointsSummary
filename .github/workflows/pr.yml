@@ -5,6 +5,8 @@ on:
     branches:
       - main
   merge_group:
+    branches:
+      - main
     types: [checks_requested]
 
 permissions:
@@ -111,6 +113,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Post failure notification
         env:
