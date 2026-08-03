@@ -14,6 +14,12 @@ on:
   workflow_run:
     workflows: ["Classify PR"]
     types: [completed]
+  # Re-verifies the label once a PR enters the merge queue. The label was
+  # already checked pre-queue, but the queue re-runs every required check
+  # against its temporary merge ref, so this must report there too or the
+  # queue entry hangs until check_response_timeout_minutes expires.
+  merge_group:
+    types: [checks_requested]
 
 permissions:
   pull-requests: read
@@ -63,6 +69,15 @@ jobs:
                 prNumber = pr.number;
                 headSha = pr.head.sha;
               }
+            } else if (context.eventName === 'merge_group') {
+              // head_ref looks like refs/heads/gh-readonly-queue/main/pr-109-<sha>
+              const headRef = context.payload.merge_group.head_ref;
+              const match = headRef.match(/\/pr-(\d+)-/);
+              if (!match) {
+                core.setFailed(`Could not parse PR number from merge_group head_ref: ${headRef}`);
+                return;
+              }
+              prNumber = parseInt(match[1], 10);
             } else {
               prNumber = context.issue.number;
             }
