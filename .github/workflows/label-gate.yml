@@ -70,7 +70,17 @@ jobs:
                 headSha = pr.head.sha;
               }
             } else if (context.eventName === 'merge_group') {
-              // head_ref looks like refs/heads/gh-readonly-queue/main/pr-109-<sha>
+              // head_ref looks like refs/heads/gh-readonly-queue/main/pr-109-<sha>.
+              // This assumes the ruleset's merge_queue grouping_strategy is HEADGREEN
+              // (one PR per queue entry). Under ALLGREEN, multiple PRs can be batched
+              // into a single entry and head_ref only encodes the top one, so this
+              // would only re-check that PR and rubber-stamp the rest of the batch.
+              // Since label-gate is also a required pre-queue check, an unlabeled PR
+              // can't enter the queue at all, so this branch is a formality re-proving
+              // what was already true, not new verification. headSha is intentionally
+              // left undefined here: checks.create() is only used on the workflow_run
+              // path below; if this path ever needs an explicit check run, use
+              // context.payload.merge_group.head_sha.
               const headRef = context.payload.merge_group.head_ref;
               const match = headRef.match(/\/pr-(\d+)-/);
               if (!match) {

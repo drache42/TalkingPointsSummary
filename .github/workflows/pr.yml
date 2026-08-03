@@ -90,7 +90,13 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - validate
-    if: ${{ always() && needs.validate.result == 'failure' && github.event.pull_request.head.repo.full_name == github.repository }}
+    # merge_group builds have no github.event.pull_request, so a queue failure
+    # (worse than a plain PR failure: it silently dequeues the PR) still needs
+    # to notify even though the repo-full-name check below can't run for it.
+    if: >-
+      ${{ always() && needs.validate.result == 'failure' &&
+          (github.event_name == 'merge_group' ||
+           github.event.pull_request.head.repo.full_name == github.repository) }}
     defaults:
       run:
         shell: pwsh
@@ -102,7 +108,7 @@ jobs:
           DISCORD_MESSAGE: |
             PR workflow failed.
             Repository: ${{ github.repository }}
-            PR: #${{ github.event.pull_request.number }}
-            Branch: ${{ github.head_ref }}
+            PR: ${{ github.event_name == 'merge_group' && 'merge queue entry' || format('#{0}', github.event.pull_request.number) }}
+            Branch: ${{ github.event_name == 'merge_group' && github.ref_name || github.head_ref }}
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: .github/scripts/notify-discord.ps1
