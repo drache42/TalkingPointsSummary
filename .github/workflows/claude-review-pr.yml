@@ -21,7 +21,7 @@ jobs:
         if: contains(github.event.pull_request.labels.*.name, 'dependencies')
         run: echo "Dependency-only PR (dependabot) - skipping AI code review, relying on Build and Test instead."
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         if: >-
           !contains(github.event.pull_request.labels.*.name, 'dependencies')
         with:
