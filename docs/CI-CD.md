@@ -79,6 +79,7 @@ Dependabot auto-merge is defined in `.github/workflows/automerge.yml`.
 - Trigger: Dependabot pull requests targeting `main`
 - Eligible updates: semver patch and semver minor updates
 - Merge mode: GitHub auto-merge using the normal PR merge flow
+- Merge identity: auto-merge is enabled with a token from the `froefam-automerge` GitHub App, not `GITHUB_TOKEN`. A merge that `GITHUB_TOKEN` pushes does not start another workflow run, so `main.yml` (and therefore `compute-version` / `auto-release`) would never fire for an auto-merged PR. The App identity makes the merge behave like a human merge and the release pipeline runs. See issue #122.
 - Safety gate: branch protection and required checks still apply, so the pull request does not merge until all required status checks pass
 - Major updates: never auto-merge
 
@@ -109,6 +110,7 @@ Enable these repository settings:
 
 1. Configure a branch ruleset targeting `main` with `label-gate` as a required status check
 2. Enable auto-merge in the repository settings so Dependabot PRs can enter GitHub's built-in auto-merge flow
+3. Create a GitHub App (`froefam-automerge`) with **Contents: read and write** and **Pull requests: read and write**, install it on this repository, and record its Client ID in `AUTOMERGE_APP_CLIENT_ID` and its private key in the `AUTOMERGE_APP_PRIVATE_KEY` Dependabot secret (see the tables below)
 
 ### Secrets
 
@@ -116,12 +118,14 @@ Enable these repository settings:
 | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | Yes | Enables `classify-pr.yml` to call the Anthropic API for automatic PR classification. Without this, classification fails and `semver: unknown` is applied. |
 | `DISCORD_WEBHOOK_URL` | No | Discord webhook URL for pipeline failure, release, and Dependabot breaking-change notifications. |
+| `AUTOMERGE_APP_PRIVATE_KEY` | Yes, for auto-merge | Private key for the `froefam-automerge` GitHub App, used by `automerge.yml` to mint the token that enables auto-merge. Must be stored as a **Dependabot** secret (Settings → Secrets and variables → Dependabot) — `automerge.yml` is triggered by Dependabot, and Dependabot-triggered runs only read secrets from that store. |
 
 ### Repository variables
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `ANTHROPIC_MODEL` | Yes | The Anthropic model ID used by `classify-pr.yml` (e.g. `claude-haiku-4-5`). Update this variable to switch models without modifying workflow files. |
+| `AUTOMERGE_APP_CLIENT_ID` | Yes, for auto-merge | Client ID of the `froefam-automerge` GitHub App, passed to `actions/create-github-app-token` in `automerge.yml`. Not secret; a plain Actions variable is fine (also readable from Dependabot-triggered runs). |
 
 No separate registry secret is required for `ghcr.io` publishing. The workflows use `GITHUB_TOKEN` with `packages: write` permission.
 
@@ -167,6 +171,8 @@ Use `act` for iteration and a draft PR for final verification.
 ## How auto-merge is controlled
 
 Dependabot auto-merge is implemented by enabling GitHub's built-in auto-merge on eligible PRs. It does not bypass branch protection.
+
+Auto-merge is enabled using a short-lived token minted from the `froefam-automerge` GitHub App (`actions/create-github-app-token`), so the eventual merge is attributed to the App rather than `github-actions[bot]`. This is required for the post-merge `main.yml` run — GitHub does not start a workflow from a `push` made with the default `GITHUB_TOKEN`.
 
 To override it:
 

@@ -11,14 +11,18 @@ on:
       - ready_for_review
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
 
 jobs:
   automerge:
     name: Enable auto-merge for eligible Dependabot PRs
     runs-on: ubuntu-latest
-    if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
+    # Both the PR author and the run actor must be Dependabot. A human pushing a
+    # fixup to a Dependabot branch (or reopening / re-running) is a human-actor
+    # run: it reads the Actions secret store, where AUTOMERGE_APP_PRIVATE_KEY
+    # (a Dependabot secret) is absent, so the token step would fail. Skip instead.
+    if: ${{ github.actor == 'dependabot[bot]' && github.event.pull_request.user.login == 'dependabot[bot]' }}
 
     steps:
       - name: Fetch Dependabot metadata
@@ -27,10 +31,39 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Enable auto-merge
+      # Enable auto-merge as the froefam-automerge GitHub App, not GITHUB_TOKEN:
+      # a merge pushed by GITHUB_TOKEN does not trigger main.yml (GitHub's
+      # workflow-recursion guard), so auto-merged PRs never get a release. See #122.
+      - name: Generate app token
+        id: app-token
         if: ${{ steps.metadata.outputs.update-type == 'version-update:semver-patch' || steps.metadata.outputs.update-type == 'version-update:semver-minor' }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.AUTOMERGE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUTOMERGE_APP_PRIVATE_KEY }}
+          # Least privilege: mint only what `gh pr merge --auto` needs, rather
+          # than inheriting every permission the installation holds.
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Enable auto-merge
+        # Runs only for eligible updates - the token step above is skipped otherwise.
+        if: ${{ steps.app-token.outcome == 'success' }}
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: gh pr merge --auto --merge "$env:PR_URL"
+
+      - name: Explain failure
+        if: ${{ failure() }}
+        shell: pwsh
+        run: |
+          @(
+            '### Dependabot auto-merge did not complete'
+            ''
+            'The `froefam-automerge` app token step or the merge step failed. Auto-merge was'
+            'not enabled; the PR can still be merged manually. Check that the'
+            '`AUTOMERGE_APP_PRIVATE_KEY` Dependabot secret is valid and the GitHub App is'
+            'still installed on this repository with Contents and Pull requests write access.'
+          ) | Add-Content -Path $env:GITHUB_STEP_SUMMARY
