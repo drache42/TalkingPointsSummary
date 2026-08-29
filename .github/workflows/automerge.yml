@@ -62,8 +62,9 @@ jobs:
           @(
             '### Dependabot auto-merge did not complete'
             ''
-            'The `froefam-automerge` app token step or the merge step failed. Auto-merge was'
-            'not enabled; the PR can still be merged manually. Check that the'
-            '`AUTOMERGE_APP_PRIVATE_KEY` Dependabot secret is valid and the GitHub App is'
-            'still installed on this repository with Contents and Pull requests write access.'
+            'A step in this job failed, so auto-merge was not enabled; the PR can still be'
+            'merged manually. If the failure is in **Generate app token**, check that the'
+            '`AUTOMERGE_APP_PRIVATE_KEY` Dependabot secret is valid and the `froefam-automerge`'
+            'GitHub App is still installed on this repository with Contents and Pull requests'
+            'write access.'
           ) | Add-Content -Path $env:GITHUB_STEP_SUMMARY
