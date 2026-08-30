@@ -83,6 +83,7 @@ See `docs/F5-DEBUGGING.md` for Aspire/Visual Studio debugging details.
 ## Working conventions
 
 - `TreatWarningsAsErrors` is enabled solution-wide (`Directory.Build.props`) — a build with warnings will fail.
+- Build/restore setup lives at the repo root: `NuGet.config` pins the `nuget.org` feed (with `<clear/>`, so restore ignores machine/user NuGet config), `global.json` pins the .NET SDK band and the `Aspire.AppHost.Sdk` MSBuild SDK version, and `Directory.Packages.props` centrally manages all `PackageReference` versions. Note that Central Package Management does *not* cover MSBuild project SDKs — when Dependabot bumps `Aspire.Hosting.*` in `Directory.Packages.props`, bump `Aspire.AppHost.Sdk` in `global.json` to the same version by hand.
 - Do not select or introduce a new NuGet/npm package, ORM, logging framework, serializer, or other dependency not already referenced in the workspace without asking the user to choose first; verify presence via the `.csproj` files, not assumption.
 - PR titles matter: they appear verbatim in GitHub release notes. Lead with user-facing impact, not implementation detail, and keep them under ~72 characters (see `.github/skills/create-pull-request/SKILL.md` and `.github/skills/semver-classification/SKILL.md` for the full rules and examples).
 - Treat TalkingPoints `x-token`/`x-contactid` values and Anthropic/SMTP credentials as secrets; never commit them.
