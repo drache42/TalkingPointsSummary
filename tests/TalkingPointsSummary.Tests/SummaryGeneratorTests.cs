@@ -447,6 +447,183 @@ public class SummaryGeneratorTests : IDisposable
         result.Prompt.Should().NotContain("Sent 2026-");
     }
 
+    /// <summary>
+    /// The caller has to be able to close out the exact rows it reported, so the result carries
+    /// the news item rows themselves rather than a count it cannot act on.
+    /// </summary>
+    [Fact]
+    public async Task BuildPromptAsync_ReturnsTheNewsItemRowsItFedIntoThePrompt()
+    {
+        var parent = await SeedParentAsync();
+        await SeedChildAsync(parent.Id);
+        var first = await SeedNewsItemAsync(parent.Id, content: "First note");
+        var second = await SeedNewsItemAsync(parent.Id, content: "Second note");
+
+        var result = await CreateGeneratorAtFixedNow().BuildPromptAsync(parent);
+
+        result!.NewsItems.Select(item => item.Id).Should().Equal(first.Id, second.Id);
+        result.NewsItemCount.Should().Be(2);
+    }
+
+    /// <summary>
+    /// The critic and the reviser have to review the digest against the same upcoming-dates list
+    /// and coverage index the draft was written from, so both travel out with the result.
+    /// </summary>
+    [Fact]
+    public async Task BuildPromptAsync_CarriesTheRenderedUpcomingDatesAndCoverageLedger()
+    {
+        var parent = await SeedParentAsync();
+        await SeedChildAsync(parent.Id, name: "StudentOne", school: "Sample Elementary");
+        var newsItem = await SeedNewsItemAsync(parent.Id, content: "A note from this week");
+
+        await SeedSummaryAsync(
+            parent.Id,
+            new DateTime(2026, 3, 2, 13, 0, 0, DateTimeKind.Utc),
+            "### Spring Concert\nTickets go on sale Monday.");
+        await SeedTrackedEventAsync(
+            parent.Id, newsItem.Id, "Sample Elementary", new DateTime(2026, 3, 20), "Book Fair");
+
+        var result = await CreateGeneratorAtFixedNow().BuildPromptAsync(parent);
+
+        result!.UpcomingDates.Should().Contain("- **Friday, March 20, 2026** - Book Fair");
+        result.CoverageLedger.Should().Contain("2026-03-02 digest:");
+        result.CoverageLedger.Should().Contain("Spring Concert");
+
+        // The rendered blocks must be what the model was actually shown, not a re-derivation that
+        // can drift from the prompt.
+        result.Prompt.Should().Contain(result.UpcomingDates!);
+        result.Prompt.Should().Contain(result.CoverageLedger!);
+    }
+
+    /// <summary>
+    /// A digest whose content was generated but never emailed has told the parent nothing. Listing
+    /// it in the coverage index would suppress the very items that are still waiting to be sent.
+    /// </summary>
+    [Fact]
+    public async Task BuildPromptAsync_ExcludesUndeliveredDigestsFromTheCoverageLedger()
+    {
+        var parent = await SeedParentAsync();
+        await SeedChildAsync(parent.Id);
+        await SeedNewsItemAsync(parent.Id, content: "Still unreported note");
+
+        await SeedSummaryAsync(
+            parent.Id,
+            new DateTime(2026, 3, 2, 13, 0, 0, DateTimeKind.Utc),
+            "### Spring Concert\nTickets go on sale Monday.",
+            delivered: false);
+
+        var result = await CreateGeneratorAtFixedNow().BuildPromptAsync(parent);
+
+        result!.CoverageLedger.Should().Be(SummaryCoverageLedger.EmptyLedgerText);
+        result.Prompt.Should().NotContain("2026-03-02 digest:");
+        result.Prompt.Should().NotContain("Tickets go on sale Monday.");
+    }
+
+    [Fact]
+    public async Task ReviseAsync_SendsTheDraftAndTheIssuesOnTheSummarizationProfile()
+    {
+        var captured = CaptureRequest("# Corrected digest\nFixed.");
+
+        var result = await CreateGeneratorAtFixedNow().ReviseAsync(
+            new SummaryRevisionRequest(
+                "# Draft digest\nThursday, May 15, 2026 is wrong.",
+                "1. Line 2 (WeekdayDateMismatch): May 15, 2026 falls on a Friday, not a Thursday.",
+                "### Sample Elementary\n- **Friday, March 20, 2026** - Book Fair"));
+
+        result.Should().Be("# Corrected digest\nFixed.");
+
+        captured.Value!.Prompt.Should().Contain("# Draft digest");
+        captured.Value.Prompt.Should().Contain("WeekdayDateMismatch");
+        captured.Value.Prompt.Should().Contain("Book Fair");
+        captured.Value.Prompt.Should().NotContain("{{");
+
+        // A revision produced under a different instruction set comes back correct and off-voice,
+        // so it runs on the same profile and system prompt that produced the draft.
+        captured.Value.ModelId.Should().Be("claude-sonnet-4-5-20250929");
+        captured.Value.Thinking.Should().Be(AiThinkingModes.Adaptive);
+        captured.Value.Effort.Should().Be(AiEffortLevels.High);
+        captured.Value.SystemPrompt.Should().NotBeNullOrEmpty();
+    }
+
+    /// <summary>
+    /// A truncated revision is unusable, but the draft it was meant to correct is intact. Throwing
+    /// here would cost the parent a whole digest to fix a wrong weekday.
+    /// </summary>
+    [Fact]
+    public async Task ReviseAsync_TruncatedResponse_ReturnsNullSoTheCallerKeepsTheDraft()
+    {
+        _mockAiClient
+            .Setup(c => c.CompleteAsync(It.IsAny<AiCompletionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AiCompletionResult("# Corrected digest\nCut off mid-", null, "max_tokens"));
+
+        var result = await CreateGeneratorAtFixedNow().ReviseAsync(
+            new SummaryRevisionRequest("# Draft digest\nBody.", "1. Something is wrong."));
+
+        result.Should().BeNull();
+    }
+
+    /// <summary>
+    /// A live claude-opus-5 response has been observed whose first content block is a thinking
+    /// block carrying no text at all.
+    /// </summary>
+    [Fact]
+    public async Task ReviseAsync_EmptyAiResponse_ReturnsNull()
+    {
+        _mockAiClient
+            .Setup(c => c.CompleteAsync(It.IsAny<AiCompletionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AiCompletionResult(string.Empty, null, "end_turn"));
+
+        var result = await CreateGeneratorAtFixedNow().ReviseAsync(
+            new SummaryRevisionRequest("# Draft digest\nBody.", "1. Something is wrong."));
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReviseAsync_ProviderThrows_ReturnsNullRatherThanTakingTheDigestDown()
+    {
+        _mockAiClient
+            .Setup(c => c.CompleteAsync(It.IsAny<AiCompletionRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("gateway unreachable"));
+
+        var result = await CreateGeneratorAtFixedNow().ReviseAsync(
+            new SummaryRevisionRequest("# Draft digest\nBody.", "1. Something is wrong."));
+
+        result.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Shutdown is the caller's decision, not a revision failure to absorb.
+    /// </summary>
+    [Fact]
+    public async Task ReviseAsync_CallerCancels_Throws()
+    {
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        _mockAiClient
+            .Setup(c => c.CompleteAsync(It.IsAny<AiCompletionRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException());
+
+        var act = async () => await CreateGeneratorAtFixedNow().ReviseAsync(
+            new SummaryRevisionRequest("# Draft digest\nBody.", "1. Something is wrong."),
+            cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task ReviseAsync_NoIssuesToFix_MakesNoAiCallAndReturnsNull()
+    {
+        var captured = CaptureRequest("# Corrected digest\nFixed.");
+
+        var result = await CreateGeneratorAtFixedNow().ReviseAsync(
+            new SummaryRevisionRequest("# Draft digest\nBody.", "   "));
+
+        result.Should().BeNull();
+        captured.Value.Should().BeNull();
+    }
+
     public void Dispose()
     {
         _db.Dispose();
@@ -513,14 +690,25 @@ public class SummaryGeneratorTests : IDisposable
         return item;
     }
 
-    private async Task<Summary> SeedSummaryAsync(int parentId, DateTime createdAt, string content)
+    /// <summary>
+    /// Seeds a prior digest. It is delivered by default, because an undelivered digest is not
+    /// part of what the parent has been told and is deliberately excluded from the coverage index.
+    /// </summary>
+    private async Task<Summary> SeedSummaryAsync(
+        int parentId,
+        DateTime createdAt,
+        string content,
+        bool delivered = true)
     {
+        var createdAtUtc = DateTime.SpecifyKind(createdAt, DateTimeKind.Utc);
+
         var summary = new Summary
         {
             ParentId = parentId,
             Prompt = "prompt",
             Content = content,
-            CreatedAt = DateTime.SpecifyKind(createdAt, DateTimeKind.Utc)
+            CreatedAt = createdAtUtc,
+            EmailSentAt = delivered ? createdAtUtc : null
         };
         _db.Summaries.Add(summary);
         await _db.SaveChangesAsync();

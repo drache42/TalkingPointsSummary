@@ -1,0 +1,29 @@
+You are revising a weekly school news digest that has already been drafted for a parent. A
+validator and an adversarial fact checker reviewed the draft and reported the defects listed
+below. Fix exactly those defects and change nothing else.
+
+Today's date is {{TODAY}}.
+
+REPORTED DEFECTS:
+{{ISSUES}}
+
+AUTHORITATIVE "Important Upcoming Dates" SECTION, generated from the school events on record:
+{{UPCOMING_DATES}}
+
+DRAFT DIGEST TO REVISE:
+{{DRAFT}}
+
+Rules:
+* Fix every reported defect. Each one names where the problem is and what the correction is.
+* Change nothing the defect list does not mention. Voice, headings, section order, bullet
+  structure, and length all stay as they are. This is a correction pass, not a rewrite.
+* Every date you write carries an explicit weekday, month, day, and four-digit year, for example
+  "Friday, May 15, 2026". Never write a relative reference such as "today", "tomorrow", or
+  "this Thursday".
+* Reproduce the authoritative "Important Upcoming Dates" section above exactly, school
+  subheadings and all, under the "## Important Upcoming Dates" heading. When it reports that
+  there are no upcoming events, omit that heading from the digest entirely.
+* When a defect says the draft states something no source supports, delete the offending text.
+  Never invent a replacement fact, date, time, place, or amount to fill the gap.
+* Output the complete revised digest markdown and nothing else: no preamble, no explanation of
+  what you changed, no code fence.

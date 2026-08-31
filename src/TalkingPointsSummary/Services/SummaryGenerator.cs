@@ -34,6 +34,13 @@ public class SummaryGenerator : ISummaryGenerator
     private readonly SummaryPromptBuilder _promptBuilder;
 
     /// <summary>
+    /// Built lazily so the revision template is read off disk only when a digest actually needs
+    /// correcting, which is the uncommon case.
+    /// </summary>
+    private static readonly Lazy<SummaryRevisionPromptBuilder> RevisionPromptBuilder =
+        new(() => new SummaryRevisionPromptBuilder());
+
+    /// <summary>
     /// Initializes a summary generator.
     /// </summary>
     /// <param name="aiClient">AI client used to execute prompts.</param>
@@ -90,8 +97,12 @@ public class SummaryGenerator : ISummaryGenerator
             return null;
         }
 
+        // Only digests that actually reached the parent's inbox belong in the coverage index. A
+        // row with content but no EmailSentAt was generated and never delivered, and its news
+        // items are still unreported, so listing it here would tell the model those topics had
+        // already been sent while the same items sit in the prompt above waiting to be reported.
         var previousSummaries = await _db.Summaries
-            .Where(s => s.ParentId == parent.Id && s.Content != null)
+            .Where(s => s.ParentId == parent.Id && s.Content != null && s.EmailSentAt != null)
             .OrderByDescending(s => s.CreatedAt)
             .ThenByDescending(s => s.Id)
             .Take(CoverageLedgerDigestCount)
@@ -123,6 +134,12 @@ public class SummaryGenerator : ISummaryGenerator
 
         var prompt = _promptBuilder.Build(nowLocal, children, newsItems, priorDigests, upcomingEvents);
 
+        // The two rendered blocks are carried out with the result rather than rebuilt later. The
+        // critic and the reviser have to see the exact upcoming-dates list and coverage index the
+        // draft was written from; re-rendering them from a second query would let the two drift.
+        var renderedUpcomingDates = SummaryPromptBuilder.BuildUpcomingDates(children, upcomingEvents);
+        var renderedCoverageLedger = SummaryCoverageLedger.Render(priorDigests);
+
         var systemPromptLength = _promptBuilder.SystemPrompt.Length;
         var estimatedTokens = (prompt.Length + systemPromptLength) / EstimatedCharsPerToken;
 
@@ -139,7 +156,11 @@ public class SummaryGenerator : ISummaryGenerator
             systemPromptLength,
             estimatedTokens);
 
-        return new SummaryPromptResult(prompt, newsItems.Count);
+        return new SummaryPromptResult(
+            prompt,
+            newsItems,
+            renderedUpcomingDates,
+            renderedCoverageLedger);
     }
 
     /// <inheritdoc/>
@@ -200,5 +221,97 @@ public class SummaryGenerator : ISummaryGenerator
         _logger.LogInformation("AI returned summary: {Length} chars", markdown.Length);
 
         return string.IsNullOrEmpty(markdown) ? null : markdown;
+    }
+
+    /// <inheritdoc/>
+    public async Task<string?> ReviseAsync(SummaryRevisionRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (string.IsNullOrWhiteSpace(request.DraftMarkdown) || string.IsNullOrWhiteSpace(request.Issues))
+        {
+            _logger.LogWarning(
+                "Summary revision skipped: the draft or the defect list was empty.");
+            return null;
+        }
+
+        var profile = _options.Profiles.Summarization;
+
+        AiCompletionResult result;
+
+        try
+        {
+            var nowLocal = TimeZoneInfo.ConvertTimeFromUtc(_timeProvider.GetUtcDateTime(), _scheduleTimeZone);
+
+            var prompt = RevisionPromptBuilder.Value.Build(
+                request.DraftMarkdown,
+                request.Issues,
+                request.UpcomingDates,
+                nowLocal);
+
+            _logger.LogInformation(
+                "Revising draft digest (model: {Model}, maxTokens: {MaxTokens}, thinking: {Thinking}, effort: {Effort})",
+                profile.ModelId, profile.MaxTokens, profile.Thinking, profile.Effort ?? "none");
+
+            // The revision runs on the summarization profile and its system prompt, so the reviser
+            // is held to the same digest rules that produced the draft. A revision written under a
+            // different instruction set would come back correct and off-voice.
+            var systemPrompt = string.IsNullOrWhiteSpace(_promptBuilder.SystemPrompt)
+                ? null
+                : _promptBuilder.SystemPrompt;
+
+            result = await _aiClient.CompleteAsync(
+                new AiCompletionRequest(
+                    prompt,
+                    profile.ModelId,
+                    profile.MaxTokens,
+                    profile.Thinking,
+                    profile.ThinkingBudgetTokens,
+                    profile.Effort,
+                    systemPrompt),
+                ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The caller is shutting the run down. That is not a revision failure to absorb.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // A revision is an improvement on a digest that is already good enough to send.
+            // Taking the run down over a failed correction pass would cost the parent the whole
+            // digest to fix a wrong weekday.
+            _logger.LogWarning(ex,
+                "Summary revision request failed; keeping the original draft digest.");
+            return null;
+        }
+
+        if (AiResponseTruncatedException.IsTruncated(result.StopReason))
+        {
+            // A truncated revision is missing its tail and must never be emailed, but the draft it
+            // was meant to correct is intact, so the caller keeps that instead of losing the week.
+            _logger.LogWarning(
+                "Summary revision was truncated at the max_tokens limit of {MaxTokens}; " +
+                "keeping the original draft digest.",
+                profile.MaxTokens);
+            return null;
+        }
+
+        var revised = result.Text;
+
+        if (string.IsNullOrWhiteSpace(revised))
+        {
+            // Observed in practice: a response whose first content block is a thinking block with
+            // no text. There is no revision in it.
+            _logger.LogWarning(
+                "Summary revision returned no text (stop reason: {StopReason}); " +
+                "keeping the original draft digest.",
+                result.StopReason ?? "none");
+            return null;
+        }
+
+        _logger.LogInformation("AI returned revised summary: {Length} chars", revised.Length);
+
+        return revised;
     }
 }

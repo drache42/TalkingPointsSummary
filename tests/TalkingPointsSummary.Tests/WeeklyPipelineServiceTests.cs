@@ -58,7 +58,10 @@ public class WeeklyPipelineServiceTests : IDisposable
         services.AddSingleton(Mock.Of<IMessageDeduplicator>());
         services.AddSingleton(Mock.Of<IMessageCategorizer>());
         services.AddSingleton(Mock.Of<INewsletterScraper>());
+        services.AddSingleton(Mock.Of<IEventExtractor>());
         services.AddSingleton(Mock.Of<ISummaryGenerator>());
+        services.AddSingleton<SummaryOutputValidator>();
+        services.AddSingleton(Mock.Of<ISummaryCritic>());
         services.AddSingleton(Mock.Of<IMarkdownConverter>());
         services.AddSingleton(Mock.Of<IEmailSender>());
         services.AddSingleton<ILogger<PipelineOrchestrator>>(NullLogger<PipelineOrchestrator>.Instance);

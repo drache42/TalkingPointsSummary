@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using TalkingPointsSummary.Configuration;
+using TalkingPointsSummary.Pipeline;
 using TalkingPointsSummary.Services;
 
 namespace TalkingPointsSummary.Tests;
@@ -53,6 +54,33 @@ public class ServiceRegistrationTests
 
         first.Should().NotBeNull();
         first.Should().BeSameAs(second);
+    }
+
+    [Fact]
+    public void ConfigureServices_ResolvesSummaryCritic()
+    {
+        using var provider = BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        var critic = scope.ServiceProvider.GetService<ISummaryCritic>();
+
+        critic.Should().BeOfType<SummaryCritic>();
+    }
+
+    /// <summary>
+    /// The orchestrator is where the extractor, the validator, and the critic are actually put to
+    /// work. Resolving it proves every one of those registrations exists and fits, which is the
+    /// difference between a service being registered and a service being used.
+    /// </summary>
+    [Fact]
+    public void ConfigureServices_ResolvesPipelineOrchestratorWithItsReviewDependencies()
+    {
+        using var provider = BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        var orchestrator = scope.ServiceProvider.GetService<PipelineOrchestrator>();
+
+        orchestrator.Should().NotBeNull();
     }
 
     /// <summary>

@@ -101,6 +101,9 @@ internal static class WorkerConfiguration
         services.AddScoped<IMessageCategorizer, MessageCategorizer>();
         services.AddScoped<IEventExtractor, EventExtractor>();
         services.AddScoped<ISummaryGenerator, SummaryGenerator>();
+        // Scoped rather than singleton: it captures the typed IAiClient, which AddHttpClient
+        // registers as transient so its handler can be rotated.
+        services.AddScoped<ISummaryCritic, SummaryCritic>();
         services.AddParentChildServices();
         services.AddScoped<PipelineOrchestrator>();
         services.AddSingleton<WeeklyPipelineService>();
