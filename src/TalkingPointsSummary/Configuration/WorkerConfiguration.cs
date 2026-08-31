@@ -94,8 +94,12 @@ internal static class WorkerConfiguration
         services.AddScoped<INewsletterUrlValidator, NewsletterUrlValidator>();
         services.AddScoped<IMessageDeduplicator, MessageDeduplicator>();
         services.AddSingleton<IMarkdownConverter, MarkdownConverter>();
+        // Stateless: holds only compiled regexes and lookup tables, and takes the current date
+        // as a Validate argument rather than reading a clock.
+        services.AddSingleton<SummaryOutputValidator>();
         services.AddScoped<IEmailSender, EmailSender>();
         services.AddScoped<IMessageCategorizer, MessageCategorizer>();
+        services.AddScoped<IEventExtractor, EventExtractor>();
         services.AddScoped<ISummaryGenerator, SummaryGenerator>();
         services.AddParentChildServices();
         services.AddScoped<PipelineOrchestrator>();
@@ -126,6 +130,39 @@ internal static class WorkerConfiguration
         _ = services.GetRequiredService<IOptions<PipelineScheduleOptions>>().Value;
     }
 
+    private const int MinimumThinkingBudgetTokens = 1024;
+
+    private static bool HasValidThinkingMode(AiProfileOptions profile) =>
+        AiThinkingModes.All.Contains(profile.Thinking, StringComparer.OrdinalIgnoreCase);
+
+    private static bool HasValidEffort(AiProfileOptions profile) =>
+        profile.Effort is null || AiEffortLevels.All.Contains(profile.Effort, StringComparer.OrdinalIgnoreCase);
+
+    private static bool HasValidMaxTokens(AiProfileOptions profile) => profile.MaxTokens >= 1;
+
+    private static bool HasValidThinkingBudget(AiProfileOptions profile)
+    {
+        if (!string.Equals(profile.Thinking, AiThinkingModes.Budget, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return profile.ThinkingBudgetTokens >= MinimumThinkingBudgetTokens
+            && profile.ThinkingBudgetTokens < profile.MaxTokens;
+    }
+
+    private static string ThinkingModeMessage(string profileName) =>
+        $"Ai:Profiles:{profileName}:Thinking must be one of: {string.Join(", ", AiThinkingModes.All)}.";
+
+    private static string EffortMessage(string profileName) =>
+        $"Ai:Profiles:{profileName}:Effort must be one of: {string.Join(", ", AiEffortLevels.All)}, or omitted.";
+
+    private static string MaxTokensMessage(string profileName) =>
+        $"Ai:Profiles:{profileName}:MaxTokens must be at least 1.";
+
+    private static string ThinkingBudgetMessage(string profileName) =>
+        $"Ai:Profiles:{profileName}:ThinkingBudgetTokens must be at least {MinimumThinkingBudgetTokens} and less than Ai:Profiles:{profileName}:MaxTokens when Thinking is 'budget'.";
+
     private static void AddValidatedOptions(IServiceCollection services, IConfiguration configuration)
     {
         services.AddOptions<AiOptions>()
@@ -140,7 +177,24 @@ internal static class WorkerConfiguration
                 "Ai:Anthropic:ApiKey is required.")
             .Validate(options => !string.IsNullOrWhiteSpace(options.Profiles.Categorization.ModelId), "Ai:Profiles:Categorization:ModelId is required.")
             .Validate(options => !string.IsNullOrWhiteSpace(options.Profiles.Summarization.ModelId), "Ai:Profiles:Summarization:ModelId is required.")
+            .Validate(options => !string.IsNullOrWhiteSpace(options.Profiles.Critique.ModelId), "Ai:Profiles:Critique:ModelId is required.")
             .Validate(options => !string.IsNullOrWhiteSpace(options.Profiles.Validation.ModelId), "Ai:Profiles:Validation:ModelId is required.")
+            .Validate(options => HasValidThinkingMode(options.Profiles.Categorization), ThinkingModeMessage("Categorization"))
+            .Validate(options => HasValidThinkingMode(options.Profiles.Summarization), ThinkingModeMessage("Summarization"))
+            .Validate(options => HasValidThinkingMode(options.Profiles.Critique), ThinkingModeMessage("Critique"))
+            .Validate(options => HasValidThinkingMode(options.Profiles.Validation), ThinkingModeMessage("Validation"))
+            .Validate(options => HasValidEffort(options.Profiles.Categorization), EffortMessage("Categorization"))
+            .Validate(options => HasValidEffort(options.Profiles.Summarization), EffortMessage("Summarization"))
+            .Validate(options => HasValidEffort(options.Profiles.Critique), EffortMessage("Critique"))
+            .Validate(options => HasValidEffort(options.Profiles.Validation), EffortMessage("Validation"))
+            .Validate(options => HasValidMaxTokens(options.Profiles.Categorization), MaxTokensMessage("Categorization"))
+            .Validate(options => HasValidMaxTokens(options.Profiles.Summarization), MaxTokensMessage("Summarization"))
+            .Validate(options => HasValidMaxTokens(options.Profiles.Critique), MaxTokensMessage("Critique"))
+            .Validate(options => HasValidMaxTokens(options.Profiles.Validation), MaxTokensMessage("Validation"))
+            .Validate(options => HasValidThinkingBudget(options.Profiles.Categorization), ThinkingBudgetMessage("Categorization"))
+            .Validate(options => HasValidThinkingBudget(options.Profiles.Summarization), ThinkingBudgetMessage("Summarization"))
+            .Validate(options => HasValidThinkingBudget(options.Profiles.Critique), ThinkingBudgetMessage("Critique"))
+            .Validate(options => HasValidThinkingBudget(options.Profiles.Validation), ThinkingBudgetMessage("Validation"))
             .ValidateOnStart();
 
         services.AddOptions<BrowserlessOptions>()

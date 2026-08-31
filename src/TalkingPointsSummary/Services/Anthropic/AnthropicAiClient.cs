@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TalkingPointsSummary.Configuration;
 
@@ -13,41 +15,75 @@ namespace TalkingPointsSummary.Services;
 /// </summary>
 internal sealed class AnthropicAiClient : IAiClient
 {
+    /// <summary>
+    /// Content block type carrying the model's visible answer. Extended thinking responses
+    /// place a "thinking" block first, so the answer must be selected by type rather than position.
+    /// </summary>
+    private const string TextBlockType = "text";
+
+    private static readonly JsonSerializerOptions ResponseSerializerOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     private readonly HttpClient _httpClient;
     private readonly AiOptions _options;
+    private readonly ILogger<AnthropicAiClient> _logger;
 
     /// <summary>
     /// Initializes an Anthropic AI client.
     /// </summary>
     /// <param name="httpClient">HTTP client used to call the Anthropic API.</param>
     /// <param name="options">AI configuration including provider credentials and profiles.</param>
-    public AnthropicAiClient(HttpClient httpClient, IOptions<AiOptions> options)
+    /// <param name="logger">Logger used to record stop reasons and token usage.</param>
+    public AnthropicAiClient(HttpClient httpClient, IOptions<AiOptions> options, ILogger<AnthropicAiClient> logger)
     {
         _httpClient = httpClient;
         _options = options.Value;
+        _logger = logger;
     }
 
     /// <inheritdoc/>
     public async Task<AiCompletionResult> CompleteAsync(AiCompletionRequest request, CancellationToken ct = default)
     {
         var provider = _options.Anthropic;
-        var requestBody = new
-        {
-            model = request.ModelId,
-            max_tokens = request.MaxTokens,
-            messages = new[] { new { role = "user", content = request.Prompt } }
-        };
+        var requestBody = BuildCompletionBody(request);
 
         var httpRequest = BuildRequest(provider, requestBody);
         var response = await _httpClient.SendAsync(httpRequest, ct);
         response.EnsureSuccessStatusCode();
 
         var raw = await response.Content.ReadAsStringAsync(ct);
-        var envelope = JsonSerializer.Deserialize<AnthropicEnvelope>(raw,
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        var envelope = JsonSerializer.Deserialize<AnthropicEnvelope>(raw, ResponseSerializerOptions);
 
-        var text = envelope?.Content?.FirstOrDefault()?.Text ?? string.Empty;
-        return new AiCompletionResult(text, raw);
+        var text = SelectTextBlock(envelope);
+        var stopReason = envelope?.StopReason;
+        var usage = MapUsage(envelope?.Usage);
+
+        _logger.LogInformation(
+            "Anthropic completion for model {ModelId}: stopReason={StopReason}, inputTokens={InputTokens}, " +
+            "outputTokens={OutputTokens}, thinkingTokens={ThinkingTokens}, " +
+            "cacheCreationInputTokens={CacheCreationInputTokens}, cacheReadInputTokens={CacheReadInputTokens}",
+            request.ModelId,
+            stopReason ?? "(none)",
+            usage?.InputTokens,
+            usage?.OutputTokens,
+            usage?.ThinkingTokens,
+            usage?.CacheCreationInputTokens,
+            usage?.CacheReadInputTokens);
+
+        if (AiResponseTruncatedException.IsTruncated(stopReason))
+        {
+            // Reported, not enforced. Whether a truncated answer is usable is the caller's decision:
+            // a truncated digest must never be sent, while a truncated categorization still has a
+            // safe fallback and would otherwise be retried and re-billed on every run forever.
+            _logger.LogWarning(
+                "Anthropic response for model {ModelId} was truncated at the max_tokens limit of {MaxTokens}; " +
+                "returning the partial text for the caller to accept or reject.",
+                request.ModelId, request.MaxTokens);
+        }
+
+        return new AiCompletionResult(text, raw, stopReason, usage);
     }
 
     /// <inheritdoc/>
@@ -93,6 +129,100 @@ internal sealed class AnthropicAiClient : IAiClient
         }
     }
 
+    /// <summary>
+    /// Builds the messages API request body, adding the thinking, effort, and cached system prompt
+    /// parameters that the requested profile calls for.
+    /// </summary>
+    /// <param name="request">Completion request carrying the profile values.</param>
+    /// <returns>An object graph ready for JSON serialization.</returns>
+    private static object BuildCompletionBody(AiCompletionRequest request)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["model"] = request.ModelId,
+            ["max_tokens"] = request.MaxTokens,
+            ["messages"] = new[] { new { role = "user", content = request.Prompt } }
+        };
+
+        if (!string.IsNullOrWhiteSpace(request.SystemPrompt))
+        {
+            // Sent as a content-block array so cache_control can mark the system prompt as an
+            // ephemeral cache breakpoint, letting the draft/critique/revise loop reuse it within a run.
+            // Prefixes below the provider's minimum cacheable size simply do not cache, which is not an error.
+            body["system"] = new[]
+            {
+                new
+                {
+                    type = TextBlockType,
+                    text = request.SystemPrompt,
+                    cache_control = new { type = "ephemeral" }
+                }
+            };
+        }
+
+        if (string.Equals(request.Thinking, AiThinkingModes.Adaptive, StringComparison.OrdinalIgnoreCase))
+        {
+            // Claude 5 family: adaptive thinking plus an optional reasoning effort level.
+            body["thinking"] = new { type = "adaptive" };
+
+            if (!string.IsNullOrWhiteSpace(request.Effort))
+            {
+                body["output_config"] = new { effort = request.Effort };
+            }
+        }
+        else if (string.Equals(request.Thinking, AiThinkingModes.Budget, StringComparison.OrdinalIgnoreCase))
+        {
+            // Claude Haiku 4.5: fixed thinking budget, and the effort parameter is not supported.
+            body["thinking"] = new { type = "enabled", budget_tokens = request.ThinkingBudgetTokens };
+        }
+
+        return body;
+    }
+
+    /// <summary>
+    /// Returns the text of the first content block whose type is "text".
+    /// </summary>
+    /// <param name="envelope">Deserialized response envelope, possibly null.</param>
+    /// <returns>The model's visible answer, or an empty string when no text block is present.</returns>
+    private static string SelectTextBlock(AnthropicEnvelope? envelope)
+    {
+        if (envelope?.Content is null)
+        {
+            return string.Empty;
+        }
+
+        foreach (var block in envelope.Content)
+        {
+            if (block is not null
+                && string.Equals(block.Type, TextBlockType, StringComparison.OrdinalIgnoreCase))
+            {
+                return block.Text ?? string.Empty;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// Converts the provider usage block into the provider-agnostic token usage record.
+    /// </summary>
+    /// <param name="usage">Usage block from the response, possibly null.</param>
+    /// <returns>Token usage, or null when the provider reported none.</returns>
+    private static AiTokenUsage? MapUsage(AnthropicUsage? usage)
+    {
+        if (usage is null)
+        {
+            return null;
+        }
+
+        return new AiTokenUsage(
+            usage.InputTokens,
+            usage.OutputTokens,
+            usage.OutputTokensDetails?.ThinkingTokens,
+            usage.CacheCreationInputTokens,
+            usage.CacheReadInputTokens);
+    }
+
     private static HttpRequestMessage BuildRequest(AnthropicProviderOptions provider, object body)
     {
         var request = new HttpRequestMessage(HttpMethod.Post,
@@ -105,12 +235,76 @@ internal sealed class AnthropicAiClient : IAiClient
 
     private sealed class AnthropicEnvelope
     {
-        public List<AnthropicContentBlock>? Content { get; set; }
+        [JsonPropertyName("content")]
+        public List<AnthropicContentBlock?>? Content { get; set; }
+
+        [JsonPropertyName("stop_reason")]
+        public string? StopReason { get; set; }
+
+        [JsonPropertyName("usage")]
+        public AnthropicUsage? Usage { get; set; }
     }
 
     private sealed class AnthropicContentBlock
     {
-        public string Type { get; set; } = string.Empty;
-        public string Text { get; set; } = string.Empty;
+        [JsonPropertyName("type")]
+        public string? Type { get; set; }
+
+        [JsonPropertyName("text")]
+        public string? Text { get; set; }
     }
+
+    private sealed class AnthropicUsage
+    {
+        [JsonPropertyName("input_tokens")]
+        public int? InputTokens { get; set; }
+
+        [JsonPropertyName("output_tokens")]
+        public int? OutputTokens { get; set; }
+
+        [JsonPropertyName("output_tokens_details")]
+        public AnthropicOutputTokensDetails? OutputTokensDetails { get; set; }
+
+        [JsonPropertyName("cache_creation_input_tokens")]
+        public int? CacheCreationInputTokens { get; set; }
+
+        [JsonPropertyName("cache_read_input_tokens")]
+        public int? CacheReadInputTokens { get; set; }
+    }
+
+    private sealed class AnthropicOutputTokensDetails
+    {
+        [JsonPropertyName("thinking_tokens")]
+        public int? ThinkingTokens { get; set; }
+    }
+}
+
+/// <summary>
+/// Exception thrown by a call site that cannot use a partial answer after the provider stopped
+/// generating at the max_tokens limit. The client itself only reports the stop reason, because
+/// truncation is fatal for a digest that would otherwise be emailed but merely degraded for a
+/// categorization that has a fallback.
+/// </summary>
+public sealed class AiResponseTruncatedException : Exception
+{
+    /// <summary>
+    /// Stop reason the provider reports when generation hit the max_tokens ceiling.
+    /// </summary>
+    public const string MaxTokensStopReason = "max_tokens";
+
+    /// <summary>
+    /// Initializes a new truncation exception.
+    /// </summary>
+    /// <param name="message">Explanation of which model was truncated and at what limit.</param>
+    public AiResponseTruncatedException(string message) : base(message)
+    {
+    }
+
+    /// <summary>
+    /// Reports whether a provider stop reason means the response was cut off at the token limit.
+    /// </summary>
+    /// <param name="stopReason">Stop reason from <see cref="AiCompletionResult.StopReason"/>.</param>
+    /// <returns><c>true</c> when the response is truncated.</returns>
+    public static bool IsTruncated(string? stopReason)
+        => string.Equals(stopReason, MaxTokensStopReason, StringComparison.OrdinalIgnoreCase);
 }

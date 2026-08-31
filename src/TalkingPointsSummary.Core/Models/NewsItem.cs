@@ -82,7 +82,18 @@ public class NewsItem
     public DateTime CreatedAt { get; set; }
 
     /// <summary>
+    /// Identifier of the summary this news item was fed into, if any. Set for every
+    /// news item supplied to a digest, not only the ones the model chose to quote.
+    /// </summary>
+    public int? IncludedInSummaryId { get; set; }
+
+    /// <summary>
     /// Parent that owns the news item.
     /// </summary>
     public Parent Parent { get; set; } = null!;
+
+    /// <summary>
+    /// Summary this news item was fed into, if any.
+    /// </summary>
+    public Summary? IncludedInSummary { get; set; }
 }

@@ -45,6 +45,11 @@ public class AppDbContext : DbContext
     public DbSet<PipelineRun> PipelineRuns => Set<PipelineRun>();
 
     /// <summary>
+    /// Dated school events extracted from news items and tracked across digests.
+    /// </summary>
+    public DbSet<TrackedEvent> TrackedEvents => Set<TrackedEvent>();
+
+    /// <summary>
     /// Configures entity mappings, constraints, indexes, and relationships.
     /// </summary>
     /// <param name="modelBuilder">Builder used to define the EF model.</param>
@@ -99,6 +104,11 @@ public class AppDbContext : DbContext
             entity.Property(e => e.FromName).HasMaxLength(200);
             entity.Property(e => e.StudentName).HasMaxLength(200);
             entity.HasIndex(e => new { e.ParentId, e.CreatedAt });
+            entity.HasIndex(e => new { e.ParentId, e.IncludedInSummaryId });
+            entity.HasOne(e => e.IncludedInSummary)
+                .WithMany()
+                .HasForeignKey(e => e.IncludedInSummaryId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         // Summary
@@ -106,6 +116,30 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => new { e.ParentId, e.CreatedAt });
+        });
+
+        // TrackedEvent
+        modelBuilder.Entity<TrackedEvent>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.School).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.Title).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.TimeText).HasMaxLength(100);
+            entity.Property(e => e.Status).IsRequired().HasConversion<string>().HasMaxLength(50);
+            entity.HasIndex(e => new { e.ParentId, e.School, e.EventDate, e.Title }).IsUnique();
+            entity.HasIndex(e => new { e.ParentId, e.Status, e.EventDate });
+            entity.HasOne(e => e.Parent)
+                .WithMany()
+                .HasForeignKey(e => e.ParentId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.NewsItem)
+                .WithMany()
+                .HasForeignKey(e => e.SourceNewsItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<TrackedEvent>()
+                .WithMany()
+                .HasForeignKey(e => e.SupersededByEventId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // PipelineRun

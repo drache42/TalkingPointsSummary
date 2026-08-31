@@ -33,6 +33,22 @@ public class Summary
     public DateTime CreatedAt { get; set; }
 
     /// <summary>
+    /// UTC time when the summary email was successfully sent. Null while the summary
+    /// has not been emailed.
+    /// </summary>
+    public DateTime? EmailSentAt { get; set; }
+
+    /// <summary>
+    /// JSON log of the critique and revision passes applied to this summary, when any ran.
+    /// </summary>
+    public string? CritiqueLog { get; set; }
+
+    /// <summary>
+    /// Number of revision passes applied to this summary after the initial generation.
+    /// </summary>
+    public int RevisionCount { get; set; }
+
+    /// <summary>
     /// Parent that owns the summary.
     /// </summary>
     public Parent Parent { get; set; } = null!;

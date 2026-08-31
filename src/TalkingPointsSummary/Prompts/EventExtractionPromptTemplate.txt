@@ -1,0 +1,50 @@
+You are extracting dated school events from a single school news item. Respond ONLY with valid JSON.
+
+The news item below was sent on {{ANCHOR_DATE}}. Every relative date reference in the text
+("this Thursday", "next Monday", "tomorrow", "a week from Friday") is relative to THAT date,
+not to today. Resolve every relative reference against {{ANCHOR_DATE}} using the calendar below.
+
+Date reference calendar (relative to the date the news item was sent):
+{{DATE_REFERENCE}}
+
+School: {{SCHOOL}}
+Student: {{STUDENT_NAME}}
+From: {{FROM_NAME}}
+Date sent: {{ANCHOR_DATE}}
+
+News content:
+{{NEWS_CONTENT}}
+
+Events already tracked for this school (status Active). Refer to these by their numeric id:
+{{EXISTING_EVENTS}}
+
+Respond with this exact JSON structure:
+{
+  "events": [
+    {
+      "title": "short event name, 80 characters or fewer",
+      "event_date": "YYYY-MM-DD",
+      "time_text": "time of day as written, for example 6:30 PM, or null if none was given",
+      "replaces_event_id": null
+    }
+  ],
+  "cancelled_event_ids": []
+}
+
+Rules:
+* Extract only events that happen on a specific calendar date. Skip vague references with no
+  resolvable date ("later this spring", "sometime in May").
+* `event_date` must always be an absolute date in YYYY-MM-DD form. Never emit a relative phrase.
+* For a multi-day event, emit one entry per day.
+* `title` should name the event itself ("Spring Concert", "Early Release Day"), not the
+  announcement wrapped around it.
+* `time_text` is free text copied from the announcement. Use null when no time was given.
+* `replaces_event_id`: set this to the id of an existing tracked event when this news item moves
+  or changes that event, for example a new date or a new time for the same event. Leave it null
+  for a brand new event. Only use an id from the tracked list above.
+* `cancelled_event_ids`: list the ids of existing tracked events this news item cancels outright.
+  A cancelled event does not also belong in `events`.
+* If the news item announces an event that already appears in the tracked list with the same
+  title and the same date, emit it anyway. Duplicates are removed downstream.
+* If the news item contains no dated events, return an empty `events` list and an empty
+  `cancelled_event_ids` list.
