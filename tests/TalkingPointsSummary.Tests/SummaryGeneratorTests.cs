@@ -159,6 +159,65 @@ public class SummaryGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task BuildPromptAsync_BacklogOverTheCap_IncludesOnlyTheOldestUpToTheCap()
+    {
+        var parent = await SeedParentAsync();
+        await SeedChildAsync(parent.Id);
+
+        // One more than the cap, seeded oldest first, so the newest item is the one left out.
+        var overflow = SummaryGenerator.MaxNewsItemsPerDigest + 1;
+        for (var i = 0; i < overflow; i++)
+        {
+            var sentAt = FixedNow.UtcDateTime.AddDays(-overflow + i);
+            await SeedNewsItemAsync(parent.Id, sentAt: sentAt, createdAt: sentAt, content: $"Backlog item {i}");
+        }
+
+        var result = await CreateGeneratorAtFixedNow().BuildPromptAsync(parent);
+
+        result.Should().NotBeNull();
+        result!.NewsItemCount.Should().Be(SummaryGenerator.MaxNewsItemsPerDigest);
+        result.Prompt.Should().Contain("Backlog item 0", "the oldest item must lead, not be starved");
+        result.Prompt.Should().NotContain($"Backlog item {overflow - 1}", "the newest item is deferred to the next digest");
+    }
+
+    [Fact]
+    public async Task BuildPromptAsync_BacklogOverTheCap_LeavesTheDeferredItemsUnreported()
+    {
+        var parent = await SeedParentAsync();
+        await SeedChildAsync(parent.Id);
+
+        var overflow = SummaryGenerator.MaxNewsItemsPerDigest + 3;
+        for (var i = 0; i < overflow; i++)
+        {
+            var sentAt = FixedNow.UtcDateTime.AddDays(-overflow + i);
+            await SeedNewsItemAsync(parent.Id, sentAt: sentAt, createdAt: sentAt, content: $"Backlog item {i}");
+        }
+
+        var result = await CreateGeneratorAtFixedNow().BuildPromptAsync(parent);
+
+        // Nothing is dropped: the overflow stays eligible so it leads the following digest.
+        result!.NewsItems.Should().HaveCount(SummaryGenerator.MaxNewsItemsPerDigest);
+        result.NewsItems.Should().OnlyContain(n => n.IncludedInSummaryId == null);
+    }
+
+    [Fact]
+    public async Task BuildPromptAsync_BacklogAtExactlyTheCap_IncludesEveryItem()
+    {
+        var parent = await SeedParentAsync();
+        await SeedChildAsync(parent.Id);
+
+        for (var i = 0; i < SummaryGenerator.MaxNewsItemsPerDigest; i++)
+        {
+            var sentAt = FixedNow.UtcDateTime.AddDays(-SummaryGenerator.MaxNewsItemsPerDigest + i);
+            await SeedNewsItemAsync(parent.Id, sentAt: sentAt, createdAt: sentAt, content: $"Boundary item {i}");
+        }
+
+        var result = await CreateGeneratorAtFixedNow().BuildPromptAsync(parent);
+
+        result!.NewsItemCount.Should().Be(SummaryGenerator.MaxNewsItemsPerDigest);
+    }
+
+    [Fact]
     public async Task BuildPromptAsync_RendersActiveFutureEventsGroupedBySchool()
     {
         var parent = await SeedParentAsync();

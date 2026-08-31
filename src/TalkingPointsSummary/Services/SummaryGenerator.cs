@@ -20,6 +20,22 @@ public class SummaryGenerator : ISummaryGenerator
     internal const int CoverageLedgerDigestCount = 12;
 
     /// <summary>
+    /// Upper bound on how many unreported news items one digest may carry.
+    /// </summary>
+    /// <remarks>
+    /// Eligibility is decided by <see cref="NewsItem.IncludedInSummaryId"/> rather than by a date
+    /// window, which is correct but unbounded on its own: an item is only marked reported after a
+    /// digest is delivered, so every run that fails after generation leaves its items eligible
+    /// again and the next prompt carries them plus a new week. Left alone that ratchets upward
+    /// until the prompt exceeds the context window and the pipeline can never recover by itself.
+    /// A row cap bounds the prompt without reintroducing a date floor. Because the query orders
+    /// oldest first, a backlog drains across successive runs in the order it accumulated instead
+    /// of starving the oldest items, and nothing is dropped: whatever does not fit stays
+    /// unreported and leads the next digest.
+    /// </remarks>
+    internal const int MaxNewsItemsPerDigest = 60;
+
+    /// <summary>
     /// Rough characters-per-token ratio, used only to log an input-size estimate. It is not
     /// accurate enough to bill against and is never used to make a decision.
     /// </summary>
@@ -84,11 +100,31 @@ public class SummaryGenerator : ISummaryGenerator
         // skips items (a message that arrived late) and repeats them (a message re-analyzed
         // inside the window). IncludedInSummaryId is written exactly once, when the item is fed
         // into a digest, and answers the only question that matters here: has this been reported?
+        //
+        // The coverage filter is unbounded on its own, so the row cap is the safety valve: see
+        // MaxNewsItemsPerDigest. Oldest first means an overflowing backlog drains in order rather
+        // than leaving the oldest items permanently starved behind newer ones.
+        var eligibleCount = await _db.NewsItems
+            .CountAsync(n => n.ParentId == parent.Id && n.IncludedInSummaryId == null, ct);
+
         var newsItems = await _db.NewsItems
             .Where(n => n.ParentId == parent.Id && n.IncludedInSummaryId == null)
             .OrderBy(n => n.SentAt)
             .ThenBy(n => n.Id)
+            .Take(MaxNewsItemsPerDigest)
             .ToListAsync(ct);
+
+        if (eligibleCount > newsItems.Count)
+        {
+            // Never silent: an overflow means a previous run failed after generating, or ingestion
+            // outran delivery. Both are operator-visible problems, not routine trimming.
+            _logger.LogWarning(
+                "Parent {ParentName} has {EligibleCount} unreported news items, over the {Cap} " +
+                "per-digest cap. Including the {Included} oldest; the remaining {Deferred} stay " +
+                "unreported and lead the next digest.",
+                parent.Name, eligibleCount, MaxNewsItemsPerDigest, newsItems.Count,
+                eligibleCount - newsItems.Count);
+        }
 
         if (newsItems.Count == 0)
         {
