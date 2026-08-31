@@ -198,6 +198,10 @@ internal static class WorkerConfiguration
             .Validate(options => HasValidThinkingBudget(options.Profiles.Summarization), ThinkingBudgetMessage("Summarization"))
             .Validate(options => HasValidThinkingBudget(options.Profiles.Critique), ThinkingBudgetMessage("Critique"))
             .Validate(options => HasValidThinkingBudget(options.Profiles.Validation), ThinkingBudgetMessage("Validation"))
+            .Validate(options => AiModelReasoning.IsCompatible(options.Profiles.Categorization.ModelId, options.Profiles.Categorization.Thinking), AiModelReasoning.IncompatibleMessage("Categorization"))
+            .Validate(options => AiModelReasoning.IsCompatible(options.Profiles.Summarization.ModelId, options.Profiles.Summarization.Thinking), AiModelReasoning.IncompatibleMessage("Summarization"))
+            .Validate(options => AiModelReasoning.IsCompatible(options.Profiles.Critique.ModelId, options.Profiles.Critique.Thinking), AiModelReasoning.IncompatibleMessage("Critique"))
+            .Validate(options => AiModelReasoning.IsCompatible(options.Profiles.Validation.ModelId, options.Profiles.Validation.Thinking), AiModelReasoning.IncompatibleMessage("Validation"))
             .ValidateOnStart();
 
         services.AddOptions<BrowserlessOptions>()

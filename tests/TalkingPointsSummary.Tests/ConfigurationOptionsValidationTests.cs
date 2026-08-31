@@ -32,6 +32,81 @@ public class ConfigurationOptionsValidationTests
             .WithMessage("*Ai:Anthropic:ApiKey*");
     }
 
+    [Theory]
+    // Claude 5 and later reject {"type":"enabled"} outright, so budget mode is unusable there.
+    [InlineData("claude-sonnet-5", "budget")]
+    [InlineData("claude-opus-5", "budget")]
+    // Claude 4.5 and earlier support neither adaptive thinking nor the effort parameter.
+    [InlineData("claude-sonnet-4-5-20250929", "adaptive")]
+    [InlineData("claude-haiku-4-5-20251001", "adaptive")]
+    public void EnsureValidatedOptions_ThinkingModeTheModelFamilyRejects_Throws(string modelId, string thinking)
+    {
+        // Without this cross-check the pairing passes check-config and then returns HTTP 400 on
+        // every single call, which reads as an outage rather than a configuration mistake.
+        using var provider = BuildServiceProvider(ValidSettingsWith(new Dictionary<string, string?>
+        {
+            ["Ai:Profiles:Summarization:ModelId"] = modelId,
+            ["Ai:Profiles:Summarization:Thinking"] = thinking,
+            ["Ai:Profiles:Summarization:ThinkingBudgetTokens"] = "8000",
+            ["Ai:Profiles:Summarization:MaxTokens"] = "32000",
+            ["Ai:Profiles:Summarization:Effort"] = thinking == "adaptive" ? "high" : null,
+        }));
+
+        var act = () => WorkerConfiguration.EnsureValidatedOptions(provider);
+
+        act.Should().Throw<OptionsValidationException>()
+            .WithMessage("*Ai:Profiles:Summarization:Thinking*");
+    }
+
+    [Theory]
+    [InlineData("claude-sonnet-5", "adaptive", "high", null)]
+    [InlineData("claude-haiku-4-5-20251001", "budget", null, "8000")]
+    [InlineData("claude-sonnet-4-5-20250929", "none", null, null)]
+    [InlineData("claude-sonnet-5", "none", null, null)]
+    // A gateway alias carries no readable family or version, so no constraint can be asserted
+    // and whatever the profile configures has to pass through unchanged.
+    [InlineData("lab-llm", "budget", null, "8000")]
+    [InlineData("lab-llm", "adaptive", "high", null)]
+    public void EnsureValidatedOptions_ThinkingModeTheModelFamilyAccepts_DoesNotThrow(
+        string modelId, string thinking, string? effort, string? budgetTokens)
+    {
+        using var provider = BuildServiceProvider(ValidSettingsWith(new Dictionary<string, string?>
+        {
+            ["Ai:Profiles:Summarization:ModelId"] = modelId,
+            ["Ai:Profiles:Summarization:Thinking"] = thinking,
+            ["Ai:Profiles:Summarization:ThinkingBudgetTokens"] = budgetTokens,
+            ["Ai:Profiles:Summarization:MaxTokens"] = "32000",
+            ["Ai:Profiles:Summarization:Effort"] = effort,
+        }));
+
+        var act = () => WorkerConfiguration.EnsureValidatedOptions(provider);
+
+        act.Should().NotThrow();
+    }
+
+    private static Dictionary<string, string?> ValidSettingsWith(Dictionary<string, string?> overrides)
+    {
+        var settings = new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:TalkingPoints"] = "Host=localhost;Database=talkingpoints;Username=postgres;Password=postgres",
+            ["Ai:Provider"] = "Anthropic",
+            ["Ai:Anthropic:ApiKey"] = "test-key",
+            ["Browserless:BaseUrl"] = "http://localhost:3000",
+            ["NewsletterScrapingSecurity:Enabled"] = "true",
+            ["TalkingPointsApi:MaxPagesPerRun"] = "3",
+            ["Smtp:Host"] = "localhost",
+            ["Smtp:Port"] = "1025",
+            ["Smtp:FromEmail"] = "dev@example.com",
+            ["PipelineSchedule:DayOfWeek"] = "1",
+            ["PipelineSchedule:Hour"] = "8",
+        };
+
+        foreach (var (key, value) in overrides)
+            settings[key] = value;
+
+        return settings;
+    }
+
     [Fact]
     public void EnsureValidatedOptions_InvalidBrowserlessUrl_Throws()
     {

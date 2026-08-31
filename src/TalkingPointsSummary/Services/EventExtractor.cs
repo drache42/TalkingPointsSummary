@@ -216,17 +216,37 @@ public partial class EventExtractor : IEventExtractor
                     "Skipping duplicate event '{Title}' on {EventDate:yyyy-MM-dd} at {School}",
                     title, eventDate, school);
 
-                // A cancellation is not a one-way door. The model is never shown cancelled rows, so
-                // it cannot name one in replaces_event_id and can only re-announce a reinstated
-                // event as if it were new. Without this the row would stay Cancelled forever and the
-                // event would never reach Important Upcoming Dates again. A response that announces
-                // and cancels the same event in one breath is left to the cancellation.
-                if (duplicate.Status == TrackedEventStatus.Cancelled
+                // Neither a cancellation nor a supersession is a one-way door. The model is only
+                // ever shown active rows, so it cannot name an inactive one in replaces_event_id
+                // and can only re-announce a revived event as if it were new. Without this the row
+                // stays inactive forever and the event never reaches Important Upcoming Dates
+                // again. A response that announces and cancels the same event in one breath is
+                // left to the cancellation.
+                if (duplicate.Status != TrackedEventStatus.Active
                     && cancelledIds?.Contains(duplicate.Id) != true)
                 {
+                    // A superseded row was displaced by a later date. Re-announcing the original
+                    // date moves the event back, so the row that displaced it has to give way in
+                    // the same breath: leaving both Active would render the event twice, on two
+                    // different dates, which is the conflicting-event defect the critic hunts for.
+                    if (duplicate.Status == TrackedEventStatus.Superseded
+                        && duplicate.SupersededByEventId is int successorId)
+                    {
+                        var successor = schoolEvents.FirstOrDefault(existing => existing.Id == successorId);
+                        if (successor is not null && successor.Status == TrackedEventStatus.Active)
+                        {
+                            _logger.LogInformation(
+                                "Event {SuccessorId} superseded by {EventId}, which news item {NewsItemId} moved back",
+                                successor.Id, duplicate.Id, newsItem.Id);
+
+                            successor.Status = TrackedEventStatus.Superseded;
+                            successor.SupersededByEventId = duplicate.Id;
+                        }
+                    }
+
                     _logger.LogInformation(
-                        "Event {EventId} reinstated because news item {NewsItemId} announces it again",
-                        duplicate.Id, newsItem.Id);
+                        "Event {EventId} reinstated from {PreviousStatus} because news item {NewsItemId} announces it again",
+                        duplicate.Id, duplicate.Status, newsItem.Id);
 
                     duplicate.Status = TrackedEventStatus.Active;
                     duplicate.SupersededByEventId = null;

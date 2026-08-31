@@ -490,7 +490,7 @@ public class EventExtractorTests : IDisposable
     }
 
     [Fact]
-    public async Task ExtractAsync_ReAnnouncedEventThatWasSuperseded_DoesNotCreateASecondRow()
+    public async Task ExtractAsync_ReAnnouncedEventSupersededByNothing_ReinstatesTheExistingRow()
     {
         var newsItem = await SeedNewsItemAsync("Reminder: Spring Concert on March 20.");
         var retired = await SeedTrackedEventAsync(
@@ -509,15 +509,19 @@ public class EventExtractorTests : IDisposable
 
         var created = await CreateExtractor().ExtractAsync(newsItem);
 
-        // A second row would violate the unique index on (ParentId, School, EventDate, Title), and
-        // a superseded row stays retired: the event moved, and the row that carries the new date is
-        // the one that renders.
+        // A second row would violate the unique index on (ParentId, School, EventDate, Title), so
+        // the existing row is reused either way. It is reinstated rather than left retired because
+        // this row carries no SupersededByEventId: there is no successor holding a newer date, so
+        // leaving it Superseded would drop the event from Important Upcoming Dates with no way
+        // back. Where a live successor does exist it is demoted instead, so the two dates are
+        // never active at once.
         created.Should().BeEmpty();
 
         await using var verify = CreateContext();
         var stored = await verify.TrackedEvents.SingleAsync();
         stored.Id.Should().Be(retired.Id);
-        stored.Status.Should().Be(TrackedEventStatus.Superseded);
+        stored.Status.Should().Be(TrackedEventStatus.Active);
+        stored.SupersededByEventId.Should().BeNull();
     }
 
     [Fact]
@@ -551,6 +555,79 @@ public class EventExtractorTests : IDisposable
         stored.Status.Should().Be(TrackedEventStatus.Active);
         stored.SupersededByEventId.Should().BeNull();
         stored.SourceNewsItemId.Should().Be(newsItem.Id, "the news item that brought it back is the current source");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ReAnnouncedEventThatWasSuperseded_MovesItBackAndDemotesItsSuccessor()
+    {
+        var newsItem = await SeedNewsItemAsync("Correction: Picture Day is back on March 20 after all.");
+        var original = await SeedTrackedEventAsync(
+            newsItem, "Picture Day", new DateTime(2026, 3, 20, 0, 0, 0, DateTimeKind.Utc));
+        var moved = await SeedTrackedEventAsync(
+            newsItem, "Picture Day", new DateTime(2026, 3, 27, 0, 0, 0, DateTimeKind.Utc));
+
+        original.Status = TrackedEventStatus.Superseded;
+        original.SupersededByEventId = moved.Id;
+        await _db.SaveChangesAsync();
+
+        // Superseded rows are never shown to the model either, so moving an event back can only
+        // arrive as a plain re-announcement of the original date. Reinstating without demoting the
+        // row that displaced it would leave both dates Active and render the event twice.
+        RespondWith("""
+            {
+              "events": [
+                { "title": "Picture Day", "event_date": "2026-03-20" }
+              ],
+              "cancelled_event_ids": []
+            }
+            """);
+
+        var created = await CreateExtractor().ExtractAsync(newsItem);
+
+        created.Should().BeEmpty("nothing is inserted, the original row comes back");
+
+        await using var verify = CreateContext();
+        var restored = await verify.TrackedEvents.SingleAsync(e => e.Id == original.Id);
+        restored.Status.Should().Be(TrackedEventStatus.Active);
+        restored.SupersededByEventId.Should().BeNull();
+
+        var displaced = await verify.TrackedEvents.SingleAsync(e => e.Id == moved.Id);
+        displaced.Status.Should().Be(TrackedEventStatus.Superseded, "both dates must never be active at once");
+        displaced.SupersededByEventId.Should().Be(original.Id);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ReAnnouncedSupersededEventWhoseSuccessorAlreadyMovedOn_LeavesTheSuccessorAlone()
+    {
+        var newsItem = await SeedNewsItemAsync("Correction: Picture Day is back on March 20 after all.");
+        var original = await SeedTrackedEventAsync(
+            newsItem, "Picture Day", new DateTime(2026, 3, 20, 0, 0, 0, DateTimeKind.Utc));
+        var moved = await SeedTrackedEventAsync(
+            newsItem, "Picture Day", new DateTime(2026, 3, 27, 0, 0, 0, DateTimeKind.Utc));
+
+        original.Status = TrackedEventStatus.Superseded;
+        original.SupersededByEventId = moved.Id;
+        // The successor was itself already cancelled, so it is not the row standing in the way.
+        moved.Status = TrackedEventStatus.Cancelled;
+        await _db.SaveChangesAsync();
+
+        RespondWith("""
+            {
+              "events": [
+                { "title": "Picture Day", "event_date": "2026-03-20" }
+              ],
+              "cancelled_event_ids": []
+            }
+            """);
+
+        await CreateExtractor().ExtractAsync(newsItem);
+
+        await using var verify = CreateContext();
+        var restored = await verify.TrackedEvents.SingleAsync(e => e.Id == original.Id);
+        restored.Status.Should().Be(TrackedEventStatus.Active);
+
+        var successor = await verify.TrackedEvents.SingleAsync(e => e.Id == moved.Id);
+        successor.Status.Should().Be(TrackedEventStatus.Cancelled, "an inactive successor is not demoted again");
     }
 
     [Fact]
