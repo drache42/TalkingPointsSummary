@@ -14,7 +14,8 @@ services:
         condition: service_healthy
     environment:
       - ConnectionStrings__TalkingPoints=Host=postgres;Database=talkingpoints;Username=postgres;Password=postgres
-      - Ai__Anthropic__ApiKey=${ANTHROPIC_API_KEY}
+      - Ai__Anthropic__ApiKey=${AI_GATEWAY_API_KEY}
+      - Ai__Anthropic__BaseUrl=${AI_GATEWAY_BASE_URL:-http://192.168.1.2:4100/anthropic}
       - ASPNETCORE_URLS=http://0.0.0.0:8080
       - Browserless__BaseUrl=http://browserless:3000
       - DebugFeatures__Enabled=${DEBUG_FEATURES_ENABLED:-false}
