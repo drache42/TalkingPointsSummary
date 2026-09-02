@@ -63,6 +63,111 @@ public class SummaryCriticTests
     }
 
     [Fact]
+    public async Task CritiqueAsync_OmittedItemWithAValidSourceItemNumber_IsParsedAndForcedToLowSeverity()
+    {
+        // The model is asked to report every omitted-item finding as "low", but severity is
+        // forced in code rather than trusted: this is bookkeeping, not a defect, and must never be
+        // able to reach the revision decision by arriving as high or medium.
+        RespondWith("""
+            {
+              "findings": [
+                {
+                  "severity": "high",
+                  "kind": "omitted-item",
+                  "quote": "",
+                  "problem": "Source item 2, about the book fair, has no trace anywhere in the draft.",
+                  "suggested_fix": "",
+                  "source_item_number": 2
+                }
+              ]
+            }
+            """);
+
+        var request = new SummaryCritiqueRequest([CreateNewsItem(), CreateNewsItem()], Draft);
+        var findings = await CreateCritic().CritiqueAsync(request);
+
+        findings.Should().ContainSingle();
+        findings[0].Kind.Should().Be(CritiqueFindingKinds.OmittedItem);
+        findings[0].Severity.Should().Be(CritiqueSeverity.Low, "an omission is bookkeeping, never a revisable defect");
+        findings[0].SourceItemNumber.Should().Be(2);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3)]
+    [InlineData(-1)]
+    public async Task CritiqueAsync_OmittedItemWithASourceItemNumberOutOfRange_IsDropped(int sourceItemNumber)
+    {
+        // Two source items are in the request, so only 1 and 2 are real references. A number
+        // outside that range is a hallucination, and keeping it would risk leaving the wrong news
+        // item, or one that does not exist, unmarked as reported.
+        RespondWith($$"""
+            {
+              "findings": [
+                {
+                  "severity": "low",
+                  "kind": "omitted-item",
+                  "quote": "",
+                  "problem": "Source item claims to be omitted.",
+                  "suggested_fix": "",
+                  "source_item_number": {{sourceItemNumber}}
+                }
+              ]
+            }
+            """);
+
+        var request = new SummaryCritiqueRequest([CreateNewsItem(), CreateNewsItem()], Draft);
+        var findings = await CreateCritic().CritiqueAsync(request);
+
+        findings.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CritiqueAsync_OmittedItemWithNoSourceItemNumber_IsDropped()
+    {
+        RespondWith("""
+            {
+              "findings": [
+                {
+                  "severity": "low",
+                  "kind": "omitted-item",
+                  "quote": "",
+                  "problem": "Source item claims to be omitted but names no number.",
+                  "suggested_fix": ""
+                }
+              ]
+            }
+            """);
+
+        var findings = await CreateCritic().CritiqueAsync(CreateRequest());
+
+        findings.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CritiqueAsync_NonOmittedFinding_LeavesSourceItemNumberNull()
+    {
+        RespondWith("""
+            {
+              "findings": [
+                {
+                  "severity": "medium",
+                  "kind": "wrong-attribution",
+                  "quote": "Kid Two's picture day",
+                  "problem": "The source item names Kid One, not Kid Two.",
+                  "suggested_fix": "Kid One's picture day"
+                }
+              ]
+            }
+            """);
+
+        var findings = await CreateCritic().CritiqueAsync(CreateRequest());
+
+        findings.Should().ContainSingle();
+        findings[0].SourceItemNumber.Should().BeNull();
+    }
+
+    [Fact]
     public async Task CritiqueAsync_JsonWrappedInCodeFences_ReturnsParsedFindings()
     {
         // Models routinely wrap JSON in a markdown fence even when told not to. The fence is not
@@ -188,6 +293,41 @@ public class SummaryCriticTests
         // A critique cut off at the ceiling is missing the findings that did not fit, and there is
         // no way to tell which. It is discarded rather than acted on, and the digest still goes.
         findings.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// A refusal is prose about declining, not a findings document. It parses to nothing anyway,
+    /// but reading the stop reason is what makes the log say why the digest went out unreviewed
+    /// instead of reporting a clean review.
+    /// </summary>
+    [Fact]
+    public async Task CritiqueAsync_ModelRefuses_ReturnsNoFindings()
+    {
+        RespondWith("I can't help with reviewing this content.", "refusal");
+
+        var findings = await CreateCritic().CritiqueAsync(CreateRequest());
+
+        findings.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CritiqueAsync_SourceItemLongerThanTheBudget_IsCappedInThePrompt()
+    {
+        RespondWith("""{"findings": []}""");
+
+        var request = CreateRequest();
+        var overflow = SummaryCritiquePromptBuilder.MaxSourceContentChars + 400;
+        request.SourceItems[0].NewsContent = new string('x', overflow);
+
+        await CreateCritic().CritiqueAsync(request);
+
+        // Unbounded here, the review request would be larger than the digest request it reviews and
+        // would fail on exactly the biggest runs. Every critic failure is swallowed into "no
+        // findings", so the digest would go out unreviewed precisely when it needs reviewing most.
+        _capturedRequest!.Prompt.Should().NotContain(new string('x', overflow));
+        _capturedRequest.Prompt.Should().Contain(
+            new string('x', SummaryCritiquePromptBuilder.MaxSourceContentChars));
+        _capturedRequest.Prompt.Should().Contain("truncated: 400 of");
     }
 
     [Fact]

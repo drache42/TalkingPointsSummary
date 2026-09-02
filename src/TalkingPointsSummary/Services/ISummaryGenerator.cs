@@ -61,7 +61,16 @@ public interface ISummaryGenerator
     /// </summary>
     /// <param name="parent">Parent to build the prompt for.</param>
     /// <param name="ct">Token used to cancel the operation.</param>
-    Task<SummaryPromptResult?> BuildPromptAsync(Parent parent, CancellationToken ct = default);
+    /// <param name="maxNewsItems">
+    /// Optional upper bound on how many unreported news items to include, always clamped to the
+    /// generator's own cap. The caller lowers it to rebuild a smaller prompt after a generation
+    /// stopped at the token ceiling; without that, a backlog large enough to truncate would
+    /// truncate identically on every later run and never drain.
+    /// </param>
+    Task<SummaryPromptResult?> BuildPromptAsync(
+        Parent parent,
+        CancellationToken ct = default,
+        int? maxNewsItems = null);
 
     /// <summary>
     /// Sends the prompt to the AI and returns the generated Markdown, or
@@ -69,6 +78,12 @@ public interface ISummaryGenerator
     /// </summary>
     /// <param name="prompt">Prompt text previously built by <see cref="BuildPromptAsync"/>.</param>
     /// <param name="ct">Token used to cancel the AI call.</param>
+    /// <exception cref="AiResponseTruncatedException">
+    /// The response stopped at the max_tokens ceiling, so the digest is missing its tail.
+    /// </exception>
+    /// <exception cref="AiResponseRefusedException">
+    /// The model declined to answer, so the response is prose about the refusal rather than a digest.
+    /// </exception>
     Task<string?> ExecutePromptAsync(string prompt, CancellationToken ct = default);
 
     /// <summary>

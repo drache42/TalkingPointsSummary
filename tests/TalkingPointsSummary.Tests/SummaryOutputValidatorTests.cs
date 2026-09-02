@@ -682,4 +682,104 @@ public class SummaryOutputValidatorTests
 
         act.Should().Throw<ArgumentNullException>();
     }
+
+    /// <summary>
+    /// The upcoming dates block is rendered in code from tracked events and handed to the model to
+    /// copy. Every other check reads the digest on its own terms, so a digest that silently drops
+    /// the section is internally consistent and passes all of them.
+    /// </summary>
+    private const string RenderedUpcomingDates =
+        "### Lincoln Elementary (Ava)\n"
+        + "- **Friday, May 22, 2026** - Field Day (9:00 AM)\n"
+        + "- **Monday, June 1, 2026** - Spring Concert\n";
+
+    [Fact]
+    public void Validate_DigestReproducesEveryTrackedEvent_ReportsNothingMissing()
+    {
+        var markdown = UpcomingDatesDigest(
+            "- **Friday, May 22, 2026** - Field Day (9:00 AM)",
+            "- **Monday, June 1, 2026** - Spring Concert");
+
+        _validator.Validate(markdown, Today, RenderedUpcomingDates)
+            .Should().NotContain(f => f.Kind == SummaryValidationFindingKind.MissingUpcomingDate);
+    }
+
+    [Fact]
+    public void Validate_DigestDropsOneTrackedEvent_ReportsThatOne()
+    {
+        var markdown = UpcomingDatesDigest("- **Friday, May 22, 2026** - Field Day (9:00 AM)");
+
+        var findings = _validator.Validate(markdown, Today, RenderedUpcomingDates)
+            .Where(f => f.Kind == SummaryValidationFindingKind.MissingUpcomingDate)
+            .ToList();
+
+        findings.Should().ContainSingle();
+        findings[0].Message.Should().Contain("Spring Concert");
+        findings[0].Message.Should().Contain("Monday, June 1, 2026");
+    }
+
+    /// <summary>
+    /// The regression deliverable 3 exists to prevent: the model omits the whole section and the
+    /// parent's digest loses every date the pipeline had on record.
+    /// </summary>
+    [Fact]
+    public void Validate_DigestOmitsTheWholeSection_ReportsEveryTrackedEvent()
+    {
+        var markdown = ProseDigest("The science fair went well.");
+
+        _validator.Validate(markdown, Today, RenderedUpcomingDates)
+            .Where(f => f.Kind == SummaryValidationFindingKind.MissingUpcomingDate)
+            .Should().HaveCount(2);
+    }
+
+    /// <summary>
+    /// A response that is not a digest at all states no wrong dates, so without this check it
+    /// scores zero findings and beats a draft that had two.
+    /// </summary>
+    [Fact]
+    public void Validate_EmptyOutputWithTrackedEvents_StillReportsThem()
+    {
+        _validator.Validate(string.Empty, Today, RenderedUpcomingDates)
+            .Should().HaveCount(2);
+    }
+
+    /// <summary>
+    /// The time of day is the announcement's own wording. A model that keeps the event but writes
+    /// the time differently has not lost anything a parent needs.
+    /// </summary>
+    [Fact]
+    public void Validate_TrackedEventPresentWithADifferentTimeRendering_IsNotReportedMissing()
+    {
+        var markdown = UpcomingDatesDigest(
+            "- **Friday, May 22, 2026** - Field Day, starting at 9am",
+            "- **Monday, June 1, 2026** - Spring Concert");
+
+        _validator.Validate(markdown, Today, RenderedUpcomingDates)
+            .Should().NotContain(f => f.Kind == SummaryValidationFindingKind.MissingUpcomingDate);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Validate_NoRenderedBlockSupplied_ChecksNothingAgainstIt(string? expected)
+    {
+        var markdown = ProseDigest("The science fair went well.");
+
+        _validator.Validate(markdown, Today, expected)
+            .Should().NotContain(f => f.Kind == SummaryValidationFindingKind.MissingUpcomingDate);
+    }
+
+    /// <summary>
+    /// With no tracked events the builder renders an instruction to omit the section entirely, and
+    /// a digest that obeys it must not be reported for the omission.
+    /// </summary>
+    [Fact]
+    public void Validate_NoTrackedEventsPlaceholder_ReportsNothing()
+    {
+        var markdown = ProseDigest("The science fair went well.");
+
+        _validator.Validate(markdown, Today, SummaryPromptBuilder.NoUpcomingDatesText)
+            .Should().NotContain(f => f.Kind == SummaryValidationFindingKind.MissingUpcomingDate);
+    }
 }

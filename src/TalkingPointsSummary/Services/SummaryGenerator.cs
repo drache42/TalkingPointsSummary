@@ -32,6 +32,13 @@ public class SummaryGenerator : ISummaryGenerator
     /// oldest first, a backlog drains across successive runs in the order it accumulated instead
     /// of starving the oldest items, and nothing is dropped: whatever does not fit stays
     /// unreported and leads the next digest.
+    ///
+    /// The cap alone does not guarantee forward progress. A backlog sitting at the cap selects the
+    /// same rows every week, so a generation that stops at the token ceiling on that set stops at
+    /// it again on the next run and the backlog never drains. That is why the caller may pass a
+    /// smaller <c>maxNewsItems</c> to <see cref="BuildPromptAsync"/>: on truncation the pipeline
+    /// rebuilds the prompt with fewer items so a delivered digest, and therefore progress, is
+    /// still possible.
     /// </remarks>
     internal const int MaxNewsItemsPerDigest = 60;
 
@@ -85,8 +92,15 @@ public class SummaryGenerator : ISummaryGenerator
     }
 
     /// <inheritdoc/>
-    public async Task<SummaryPromptResult?> BuildPromptAsync(Parent parent, CancellationToken ct = default)
+    public async Task<SummaryPromptResult?> BuildPromptAsync(
+        Parent parent,
+        CancellationToken ct = default,
+        int? maxNewsItems = null)
     {
+        var itemCap = maxNewsItems is int requested
+            ? Math.Clamp(requested, 1, MaxNewsItemsPerDigest)
+            : MaxNewsItemsPerDigest;
+
         var nowUtc = _timeProvider.GetUtcDateTime();
         var nowLocal = TimeZoneInfo.ConvertTimeFromUtc(nowUtc, _scheduleTimeZone);
         // TrackedEvent.EventDate holds the local calendar date of the event stamped as UTC midnight,
@@ -111,7 +125,7 @@ public class SummaryGenerator : ISummaryGenerator
             .Where(n => n.ParentId == parent.Id && n.IncludedInSummaryId == null)
             .OrderBy(n => n.SentAt)
             .ThenBy(n => n.Id)
-            .Take(MaxNewsItemsPerDigest)
+            .Take(itemCap)
             .ToListAsync(ct);
 
         if (eligibleCount > newsItems.Count)
@@ -122,7 +136,7 @@ public class SummaryGenerator : ISummaryGenerator
                 "Parent {ParentName} has {EligibleCount} unreported news items, over the {Cap} " +
                 "per-digest cap. Including the {Included} oldest; the remaining {Deferred} stay " +
                 "unreported and lead the next digest.",
-                parent.Name, eligibleCount, MaxNewsItemsPerDigest, newsItems.Count,
+                parent.Name, eligibleCount, itemCap, newsItems.Count,
                 eligibleCount - newsItems.Count);
         }
 
@@ -252,6 +266,23 @@ public class SummaryGenerator : ISummaryGenerator
                 $"{profile.MaxTokens} and is truncated. Increase MaxTokens or shorten the prompt.");
         }
 
+        // A refusal arrives as HTTP 200 carrying a normal text block, so the only thing separating
+        // "here is your digest" from "I won't write that" is the stop reason. Nothing downstream
+        // can tell them apart: the validator finds no dates to object to in a decline, and the
+        // critic reviewing the same content usually declines too. Left unchecked, the refusal is
+        // emailed as the week's digest and every news item that fed it is marked reported.
+        if (AiResponseRefusedException.IsRefusal(result.StopReason))
+        {
+            _logger.LogError(
+                "Model {Model} refused to generate the summary (stop reason '{StopReason}'); " +
+                "discarding the response.",
+                profile.ModelId, result.StopReason);
+
+            throw new AiResponseRefusedException(
+                $"Model '{profile.ModelId}' refused to generate the summary. The response is a " +
+                "refusal, not a digest, and was not sent.");
+        }
+
         var markdown = result.Text;
 
         _logger.LogInformation("AI returned summary: {Length} chars", markdown.Length);
@@ -330,6 +361,17 @@ public class SummaryGenerator : ISummaryGenerator
                 "Summary revision was truncated at the max_tokens limit of {MaxTokens}; " +
                 "keeping the original draft digest.",
                 profile.MaxTokens);
+            return null;
+        }
+
+        if (AiResponseRefusedException.IsRefusal(result.StopReason))
+        {
+            // The reviser declined. Its text block is prose about the refusal, not a digest, and
+            // substituting it for the draft would email the decline to the parent.
+            _logger.LogWarning(
+                "Model {Model} refused to revise the digest (stop reason '{StopReason}'); " +
+                "keeping the original draft digest.",
+                profile.ModelId, result.StopReason);
             return null;
         }
 

@@ -44,6 +44,21 @@ public sealed class SummaryCritiquePromptBuilder
     /// </summary>
     private const int MaxCalendarLookaheadDays = 120;
 
+    /// <summary>
+    /// Per-item character budget applied to each source item's content.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately the same budget the digest prompt applies, because the critic has to review the
+    /// draft against what the generator was actually shown. Sending the full unbounded scrape here
+    /// would make the review request larger than the request it reviews, so the critic would fail
+    /// on exactly the biggest runs, and every failure is swallowed into "no findings": the digest
+    /// would then go out unreviewed precisely when it most needs reviewing.
+    /// </remarks>
+    public const int MaxSourceContentChars = SummaryPromptBuilder.DefaultNewsContentCharBudget;
+
+    private const string TruncationNoticeFormat =
+        "[... truncated: {0} of {1} characters omitted from this source item ...]";
+
     private static readonly Lazy<string> DefaultTemplate = new(LoadDefaultTemplate);
 
     private readonly string _template;
@@ -200,11 +215,36 @@ public sealed class SummaryCritiquePromptBuilder
                 builder.AppendLine($"One-line summary: {item.AiSummary}");
 
             builder.AppendLine("Content:");
-            builder.AppendLine(string.IsNullOrWhiteSpace(item.NewsContent) ? "(empty)" : item.NewsContent);
+            builder.AppendLine(
+                string.IsNullOrWhiteSpace(item.NewsContent)
+                    ? "(empty)"
+                    : ApplyCharBudget(item.NewsContent));
             builder.AppendLine();
         }
 
         return builder.ToString().TrimEnd();
+    }
+
+    /// <summary>
+    /// Caps one source item at the same budget the digest prompt applied to it, stating plainly how
+    /// much was dropped so the critic does not read a mid-sentence stop as the end of the source
+    /// and report the draft for omitting what follows.
+    /// </summary>
+    private static string ApplyCharBudget(string content)
+    {
+        if (content.Length <= MaxSourceContentChars)
+            return content;
+
+        var cut = MaxSourceContentChars;
+        if (char.IsHighSurrogate(content[cut - 1]))
+            cut--;
+
+        var omitted = (content.Length - cut).ToString(CultureInfo.InvariantCulture);
+        var total = content.Length.ToString(CultureInfo.InvariantCulture);
+
+        return content[..cut]
+            + Environment.NewLine
+            + string.Format(CultureInfo.InvariantCulture, TruncationNoticeFormat, omitted, total);
     }
 
     private static string LoadDefaultTemplate()

@@ -18,6 +18,18 @@ public class EventExtractionJsonResponse
     /// </summary>
     [JsonPropertyName("cancelled_event_ids")]
     public List<int>? CancelledEventIds { get; set; }
+
+    /// <summary>
+    /// Identifiers of previously cancelled events this news item states are back on.
+    /// </summary>
+    /// <remarks>
+    /// This is the only way a cancelled event returns to the digest. A re-announcement is not
+    /// enough on its own: a reprinted monthly calendar re-announces every event on it, cancelled
+    /// ones included, so reviving on that alone would put called-off events back in front of
+    /// parents every week.
+    /// </remarks>
+    [JsonPropertyName("reinstated_event_ids")]
+    public List<int>? ReinstatedEventIds { get; set; }
 }
 
 /// <summary>

@@ -22,6 +22,25 @@ public class PipelineOrchestrator
     /// </summary>
     private const string EmailSubject = "Talking Points Summary";
 
+    /// <summary>
+    /// Smallest batch a truncation retry will shrink to. Below this the prompt is no longer the
+    /// problem, so shrinking further only produces an ever more threadbare digest.
+    /// </summary>
+    internal const int MinNewsItemsPerDigest = 4;
+
+    /// <summary>
+    /// Shortest a revision may be, as a fraction of the draft it corrects, before it is rejected
+    /// as content loss rather than accepted as a correction.
+    /// </summary>
+    /// <remarks>
+    /// Fixing a weekday, deleting an unsupported sentence, or dropping a past date changes a digest
+    /// by a line or two. A response that comes back at less than half the length is a preamble, a
+    /// refusal, or a rewrite that threw the week's news away, and the validator cannot see that:
+    /// text that is not there states no wrong dates, so it scores zero findings and would win the
+    /// straight count comparison against a draft that had two.
+    /// </remarks>
+    internal const double MinRevisionLengthRatio = 0.5;
+
     private static readonly JsonSerializerOptions CritiqueLogSerializerOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -141,32 +160,13 @@ public class PipelineOrchestrator
                 await ProcessMessageAsync(parent, message, ct);
             }
 
-            // Step 5: Build summary prompt
-            var promptResult = await _summaryGenerator.BuildPromptAsync(parent, ct);
-            if (promptResult == null)
-            {
-                _logger.LogInformation("No summary generated for parent {ParentName} (no news items)", parent.Name);
+            // Steps 5 to 7: build the prompt, persist it, and generate, shrinking the batch and
+            // retrying if the model stops at its token ceiling.
+            var generated = await GenerateDigestAsync(parent, ct);
+            if (generated is null)
                 return;
-            }
 
-            // Step 6: Persist prompt row before AI call so it is always saved
-            var summary = new Summary
-            {
-                ParentId = parent.Id,
-                Prompt = promptResult.Prompt,
-                Content = null,
-                CreatedAt = _timeProvider.GetUtcDateTime()
-            };
-            _db.Summaries.Add(summary);
-            await _db.SaveChangesAsync(ct);
-
-            // Step 7: Execute AI to produce Markdown
-            var markdown = await _summaryGenerator.ExecutePromptAsync(promptResult.Prompt, ct);
-            if (string.IsNullOrEmpty(markdown))
-            {
-                _logger.LogWarning("AI returned empty summary for parent {ParentName}; prompt row saved for debugging", parent.Name);
-                return;
-            }
+            var (summary, promptResult, markdown) = generated.Value;
 
             // Step 8: Validate and critique the draft, correcting it when either found defects
             var review = await ReviewAsync(promptResult, markdown, ct);
@@ -191,7 +191,7 @@ public class PipelineOrchestrator
             // IncludedInSummaryId before the send would bury this week's items behind a digest
             // that never arrived, and they would never be reported again.
             summary.EmailSentAt = _timeProvider.GetUtcDateTime();
-            await MarkNewsItemsReportedAsync(promptResult, summary.Id, ct);
+            await MarkNewsItemsReportedAsync(promptResult, review.OmittedNewsItemIds, summary.Id, ct);
             await _db.SaveChangesAsync(ct);
 
             _logger.LogInformation("=== Pipeline completed for parent: {ParentName} ===", parent.Name);
@@ -205,13 +205,98 @@ public class PipelineOrchestrator
     }
 
     /// <summary>
+    /// Builds the prompt, saves the prompt row, and generates the draft digest, halving the number
+    /// of news items and trying again when the model stops at its token ceiling.
+    /// </summary>
+    /// <remarks>
+    /// Eligibility is driven by <see cref="NewsItem.IncludedInSummaryId"/>, so an item stays
+    /// eligible until a digest carrying it is delivered. A backlog sitting at the generator's row
+    /// cap therefore selects the same rows on every run: if that set truncates once it truncates
+    /// forever, and the parent never receives another digest without manual intervention. Halving
+    /// the batch trades a shorter digest this week for a delivery that actually drains the
+    /// backlog. The retry costs a second model call, which is worth it once a week to break a
+    /// stall that is otherwise permanent.
+    /// </remarks>
+    /// <returns>
+    /// The saved summary row, the prompt it was built from, and the draft markdown, or
+    /// <see langword="null"/> when there is nothing to summarize or the model returned nothing.
+    /// </returns>
+    private async Task<(Summary Summary, SummaryPromptResult PromptResult, string Markdown)?> GenerateDigestAsync(
+        Parent parent,
+        CancellationToken ct)
+    {
+        Summary? summary = null;
+        int? itemLimit = null;
+
+        while (true)
+        {
+            // Step 5: Build summary prompt
+            var promptResult = await _summaryGenerator.BuildPromptAsync(parent, ct, itemLimit);
+            if (promptResult == null)
+            {
+                _logger.LogInformation("No summary generated for parent {ParentName} (no news items)", parent.Name);
+                return null;
+            }
+
+            // Step 6: Persist prompt row before the AI call so it is always saved. A retry reuses
+            // the same row rather than leaving a trail of abandoned prompts behind it.
+            if (summary is null)
+            {
+                summary = new Summary
+                {
+                    ParentId = parent.Id,
+                    Prompt = promptResult.Prompt,
+                    Content = null,
+                    CreatedAt = _timeProvider.GetUtcDateTime()
+                };
+                _db.Summaries.Add(summary);
+            }
+            else
+            {
+                summary.Prompt = promptResult.Prompt;
+            }
+
+            await _db.SaveChangesAsync(ct);
+
+            // Step 7: Execute AI to produce Markdown
+            string? markdown;
+
+            try
+            {
+                markdown = await _summaryGenerator.ExecutePromptAsync(promptResult.Prompt, ct);
+            }
+            catch (AiResponseTruncatedException ex) when (promptResult.NewsItemCount > MinNewsItemsPerDigest)
+            {
+                itemLimit = Math.Max(promptResult.NewsItemCount / 2, MinNewsItemsPerDigest);
+
+                _logger.LogWarning(ex,
+                    "Digest for parent {ParentName} was truncated with {NewsItemCount} news items; "
+                    + "rebuilding it with the oldest {ReducedCount} so the backlog can still drain.",
+                    parent.Name, promptResult.NewsItemCount, itemLimit);
+
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(markdown))
+            {
+                _logger.LogWarning("AI returned empty summary for parent {ParentName}; prompt row saved for debugging", parent.Name);
+                return null;
+            }
+
+            return (summary, promptResult, markdown);
+        }
+    }
+
+    /// <summary>
     /// Runs the deterministic validator and the AI critic over the draft, and applies a single
     /// correction pass when either reports something worth correcting.
     /// </summary>
     /// <remarks>
-    /// Review never blocks a send. A revision is kept only when it comes back non-empty and no
-    /// worse than the draft by the validator's own count, so a reviser that mangles the digest
-    /// cannot make the emailed result worse than what generation produced.
+    /// Review never blocks a send. A revision replaces the draft only when it survives
+    /// <see cref="IsUsableRevision"/>, which asks whether the response is still a digest at all,
+    /// and then scores no worse than the draft by the validator's own count. Neither test alone is
+    /// enough: a count comparison cannot see content that is simply absent, and a shape check
+    /// cannot see a wrong weekday.
     /// </remarks>
     private async Task<DigestReview> ReviewAsync(
         SummaryPromptResult promptResult,
@@ -222,7 +307,10 @@ public class PipelineOrchestrator
             .ConvertTimeFromUtc(_timeProvider.GetUtcDateTime(), _scheduleTimeZone)
             .Date;
 
-        var validationFindings = _outputValidator.Validate(markdown, todayLocal);
+        // The rendered upcoming-dates block travels into validation, so a digest that dropped or
+        // rewrote the section the pipeline rendered for it is reported rather than passed as clean.
+        var validationFindings = _outputValidator.Validate(
+            markdown, todayLocal, promptResult.UpcomingDates);
 
         var critiqueFindings = await _critic.CritiqueAsync(
             new SummaryCritiqueRequest(
@@ -232,22 +320,35 @@ public class PipelineOrchestrator
                 promptResult.CoverageLedger),
             ct);
 
-        if (validationFindings.Count == 0 && critiqueFindings.Count == 0)
+        // The critic runs once, against this draft. A revision may only correct wording, dates,
+        // and formatting the reviser is explicitly told about below; it is never asked to add or
+        // remove whole items, so which news items actually reached the reader does not change
+        // between the draft and whatever markdown this method ultimately returns.
+        var omittedNewsItemIds = ResolveOmittedNewsItemIds(critiqueFindings, promptResult.NewsItems);
+
+        // Bookkeeping, not a defect: omitting the weakest items to respect the digest's length and
+        // bullet caps is expected of the writer. Feeding it to the reviser would just invite it to
+        // cram dropped items back in, so it never reaches the revision decision or its prompt.
+        var revisableCritiqueFindings = critiqueFindings
+            .Where(finding => finding.Kind != CritiqueFindingKinds.OmittedItem)
+            .ToList();
+
+        if (validationFindings.Count == 0 && revisableCritiqueFindings.Count == 0)
         {
             _logger.LogInformation("Draft digest passed validation and critique with no findings.");
-            return new DigestReview(markdown, null, 0);
+            return new DigestReview(markdown, null, 0, omittedNewsItemIds);
         }
 
         _logger.LogInformation(
             "Draft digest review found {ValidationFindingCount} validation finding(s) and "
             + "{CritiqueFindingCount} critique finding(s).",
-            validationFindings.Count, critiqueFindings.Count);
+            validationFindings.Count, revisableCritiqueFindings.Count);
 
         // A low-severity critique finding is redundant or trivially wrong content, not something a
         // parent would act on. Spending a second full model call on it, and risking a reviser that
         // rewrites more than it was asked to, costs more than the defect does.
         var worthRevising = validationFindings.Count > 0
-            || critiqueFindings.Any(finding => finding.Severity != CritiqueSeverity.Low);
+            || revisableCritiqueFindings.Any(finding => finding.Severity != CritiqueSeverity.Low);
 
         if (!worthRevising)
         {
@@ -256,25 +357,46 @@ public class PipelineOrchestrator
             return new DigestReview(
                 markdown,
                 BuildCritiqueLog(validationFindings, critiqueFindings, revised: false, postRevision: null),
-                0);
+                0,
+                omittedNewsItemIds);
         }
 
         var revised = await _summaryGenerator.ReviseAsync(
             new SummaryRevisionRequest(
                 markdown,
-                FormatIssues(validationFindings, critiqueFindings),
+                FormatIssues(validationFindings, revisableCritiqueFindings),
                 promptResult.UpcomingDates),
             ct);
 
         if (string.IsNullOrWhiteSpace(revised))
         {
+            // ReviseAsync reports every failure this way: a truncated response, a refusal, an empty
+            // completion, or a provider outage. The draft is intact, so it is what goes out.
+            _logger.LogInformation(
+                "No usable revision came back; sending the draft digest as generated.");
+
             return new DigestReview(
                 markdown,
                 BuildCritiqueLog(validationFindings, critiqueFindings, revised: false, postRevision: null),
-                0);
+                0,
+                omittedNewsItemIds);
         }
 
-        var postRevisionFindings = _outputValidator.Validate(revised, todayLocal);
+        if (!IsUsableRevision(markdown, revised, out var rejection))
+        {
+            _logger.LogWarning(
+                "Discarding the revised digest: {Reason} Sending the draft digest as generated.",
+                rejection);
+
+            return new DigestReview(
+                markdown,
+                BuildCritiqueLog(validationFindings, critiqueFindings, revised: false, postRevision: null),
+                0,
+                omittedNewsItemIds);
+        }
+
+        var postRevisionFindings = _outputValidator.Validate(
+            revised, todayLocal, promptResult.UpcomingDates);
 
         if (postRevisionFindings.Count > validationFindings.Count)
         {
@@ -286,7 +408,8 @@ public class PipelineOrchestrator
             return new DigestReview(
                 markdown,
                 BuildCritiqueLog(validationFindings, critiqueFindings, revised: false, postRevisionFindings),
-                0);
+                0,
+                omittedNewsItemIds);
         }
 
         _logger.LogInformation(
@@ -297,7 +420,95 @@ public class PipelineOrchestrator
         return new DigestReview(
             revised,
             BuildCritiqueLog(validationFindings, critiqueFindings, revised: true, postRevisionFindings),
-            1);
+            1,
+            omittedNewsItemIds);
+    }
+
+    /// <summary>
+    /// Maps the critic's omitted-item findings onto the actual news item ids they refer to.
+    /// </summary>
+    /// <remarks>
+    /// The critic names items by their 1-based "SOURCE ITEM N" position, the same order and
+    /// numbering <see cref="SummaryPromptResult.NewsItems"/> was rendered in for both the digest
+    /// prompt and the critique prompt. <see cref="SummaryCritic"/> has already range-checked the
+    /// number against the source item count it was given, but that count is validated against the
+    /// request the critic itself received; this defends the same way against a number that is
+    /// in-range but does not line up with this particular <paramref name="newsItems"/> list.
+    /// </remarks>
+    private static IReadOnlyList<int> ResolveOmittedNewsItemIds(
+        IReadOnlyList<CritiqueFinding> critiqueFindings,
+        IReadOnlyList<NewsItem> newsItems)
+    {
+        List<int>? omitted = null;
+
+        foreach (var finding in critiqueFindings)
+        {
+            if (finding.Kind != CritiqueFindingKinds.OmittedItem || finding.SourceItemNumber is not int number)
+                continue;
+
+            var index = number - 1;
+            if (index < 0 || index >= newsItems.Count)
+                continue;
+
+            omitted ??= [];
+            omitted.Add(newsItems[index].Id);
+        }
+
+        return omitted ?? [];
+    }
+
+    /// <summary>
+    /// Reports whether a revision is still recognizably the digest it was asked to correct.
+    /// </summary>
+    /// <remarks>
+    /// The validator reads a digest on its own terms: it counts wrong weekdays and past dates, and
+    /// it has nothing to say about a response that is not a digest at all. "Here is the corrected
+    /// digest:" stops with an ordinary end_turn, is not empty, and scores zero findings, so on a
+    /// straight count comparison it beats a draft with two and gets emailed as the week's news,
+    /// stamping every news item the critic did not separately flag as omitted from the draft it
+    /// replaced, even though almost none of that draft's content survived into what was actually
+    /// sent. This is the check that stops that: a correction pass is allowed to fix lines, not to
+    /// throw the digest away.
+    /// </remarks>
+    /// <param name="draft">The draft digest the revision was asked to correct.</param>
+    /// <param name="revised">The revision that came back.</param>
+    /// <param name="rejection">Why the revision was rejected, when it was.</param>
+    /// <returns><c>true</c> when the revision may replace the draft.</returns>
+    internal static bool IsUsableRevision(string draft, string revised, out string rejection)
+    {
+        var minimumLength = (int)(draft.Length * MinRevisionLengthRatio);
+
+        if (revised.Length < minimumLength)
+        {
+            rejection =
+                $"it is {revised.Length} characters against the draft's {draft.Length}, "
+                + $"below the {minimumLength} a correction pass should leave standing.";
+            return false;
+        }
+
+        // A digest is a set of headed sections. A response carrying none of them is prose about the
+        // digest rather than the digest itself, however long it is.
+        if (CountHeadings(draft) > 0 && CountHeadings(revised) == 0)
+        {
+            rejection = "it carries no markdown headings at all while the draft does.";
+            return false;
+        }
+
+        rejection = string.Empty;
+        return true;
+    }
+
+    private static int CountHeadings(string markdown)
+    {
+        var count = 0;
+
+        foreach (var line in markdown.Split('\n'))
+        {
+            if (line.TrimStart().StartsWith('#'))
+                count++;
+        }
+
+        return count;
     }
 
     /// <summary>
@@ -372,21 +583,46 @@ public class PipelineOrchestrator
     }
 
     /// <summary>
-    /// Stamps every news item fed into this digest with the summary that reported it, so it is
-    /// never handed to a later digest again.
+    /// Stamps every news item that actually reached the reader in this digest with the summary
+    /// that reported it, so it is never handed to a later digest again.
     /// </summary>
     /// <remarks>
+    /// Being fed into the prompt is not enough: <paramref name="omittedNewsItemIds"/> names the
+    /// items the critic found no trace of anywhere in the sent markdown, and those are left with
+    /// <see cref="NewsItem.IncludedInSummaryId"/> unset so <c>BuildPromptAsync</c>'s eligibility
+    /// filter picks them up again next run. Marking a fed-in item as reported regardless of whether
+    /// its content survived into the prose would drop it from every future digest the moment the
+    /// model dropped it once, permanently, with no parent ever having read it.
+    /// <para>
     /// The rows are re-read by id rather than mutated through the objects the generator returned.
     /// In production both services share one scoped context and the two are the same instances,
     /// but writing through a detached graph would silently persist nothing, and this is the write
     /// that stops a digest repeating last week's news.
+    /// </para>
     /// </remarks>
     private async Task MarkNewsItemsReportedAsync(
         SummaryPromptResult promptResult,
+        IReadOnlyList<int> omittedNewsItemIds,
         int summaryId,
         CancellationToken ct)
     {
-        var newsItemIds = promptResult.NewsItems.Select(newsItem => newsItem.Id).ToList();
+        var omitted = omittedNewsItemIds.Count == 0
+            ? null
+            : new HashSet<int>(omittedNewsItemIds);
+
+        var newsItemIds = promptResult.NewsItems
+            .Select(newsItem => newsItem.Id)
+            .Where(id => omitted is null || !omitted.Contains(id))
+            .ToList();
+
+        if (omitted is { Count: > 0 })
+        {
+            _logger.LogInformation(
+                "Leaving {OmittedCount} news item(s) unreported for summary {SummaryId}: the critic "
+                + "found no trace of them in the sent digest, so they carry into next week's.",
+                omitted.Count, summaryId);
+        }
+
         if (newsItemIds.Count == 0)
             return;
 
@@ -449,11 +685,64 @@ public class PipelineOrchestrator
                     events.Count, newsItem.Id);
             }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The caller is shutting the run down. That is not an extraction failure to absorb.
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "Failed to extract events from news item {NewsItemId}; the news item is kept",
-                newsItem.Id);
+                "Failed to extract events from news item {NewsItemId} (parent {ParentId}); "
+                + "the news item is kept and its dates are recovered when the event is announced again",
+                newsItem.Id, newsItem.ParentId);
+
+            await DiscardPendingTrackedEventChangesAsync(ct);
+        }
+    }
+
+    /// <summary>
+    /// Rolls back whatever the failed extraction left pending in the change tracker.
+    /// </summary>
+    /// <remarks>
+    /// A failed SaveChanges leaves its entities Added or Modified, and the very next SaveChanges on
+    /// the same context retries them. This context is shared by every parent in the run, so without
+    /// this the failure escapes the news item it belongs to: the next save is the one that persists
+    /// this parent's digest, and it, and every later parent's, would throw on the same orphaned
+    /// row. Swallowing the extraction error is only safe if nothing survives it.
+    /// </remarks>
+    private async Task DiscardPendingTrackedEventChangesAsync(CancellationToken ct)
+    {
+        foreach (var entry in _db.ChangeTracker.Entries<TrackedEvent>().ToList())
+        {
+            if (entry.State == EntityState.Added)
+            {
+                entry.State = EntityState.Detached;
+                continue;
+            }
+
+            if (entry.State is not (EntityState.Modified or EntityState.Deleted))
+                continue;
+
+            try
+            {
+                // Reload rather than just marking it unchanged: the in-memory row carries the
+                // half-applied status change, and a later query in this same run would be handed
+                // that tracked instance instead of what the database actually holds.
+                await entry.ReloadAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Could not reload tracked event {EventId} after a failed extraction; detaching it",
+                    entry.Entity.Id);
+
+                entry.State = EntityState.Detached;
+            }
         }
     }
 
@@ -577,7 +866,25 @@ public class PipelineOrchestrator
     /// <summary>
     /// The digest that came out of the review stage and the record of what the review did.
     /// </summary>
-    private sealed record DigestReview(string Markdown, string? CritiqueLog, int RevisionCount);
+    /// <param name="Markdown">The digest markdown to send, either the draft or an accepted revision.</param>
+    /// <param name="CritiqueLog">
+    /// The rendered validation and critique findings, ready to persist on the summary row, or
+    /// <see langword="null"/> when the draft passed with nothing to report.
+    /// </param>
+    /// <param name="RevisionCount">
+    /// <c>1</c> when a revision was generated and accepted in place of the draft, otherwise <c>0</c>.
+    /// </param>
+    /// <param name="OmittedNewsItemIds">
+    /// Ids of news items the critic found no trace of anywhere in the digest, fed into the prompt
+    /// but never actually reported. These are excluded when the pipeline stamps
+    /// <see cref="NewsItem.IncludedInSummaryId"/>, so they roll into next week's digest instead of
+    /// being marked delivered for content the parent never received.
+    /// </param>
+    private sealed record DigestReview(
+        string Markdown,
+        string? CritiqueLog,
+        int RevisionCount,
+        IReadOnlyList<int> OmittedNewsItemIds);
 
     private sealed record ValidationFindingLog(string Kind, int LineNumber, string Excerpt, string Message);
 

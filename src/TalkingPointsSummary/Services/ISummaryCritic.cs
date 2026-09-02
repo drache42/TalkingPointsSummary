@@ -59,6 +59,23 @@ public static class CritiqueFindingKinds
     public const string ConflictingEvent = "conflicting-event";
 
     /// <summary>
+    /// A source item that has no trace anywhere in the draft: no title, fact, name, date, or any
+    /// other detail from it appears, not even merged into another item's sentence.
+    /// </summary>
+    /// <remarks>
+    /// This is not a defect the digest needs correcting for: the prompt tells the model to merge
+    /// or drop the weakest items rather than exceed its length and bullet caps, so an omission is
+    /// often the correct outcome for a busy week. It is reported anyway so the orchestrator can
+    /// leave the omitted item's <see cref="TalkingPointsSummary.Models.NewsItem.IncludedInSummaryId"/>
+    /// unset, which carries it into next week's digest instead of marking it reported for content
+    /// the parent never actually received. This kind is deliberately excluded from the revision
+    /// prompt and from the decision to attempt a revision at all: asking the reviser to "fix" an
+    /// omission would just mean cramming the item back in, which undoes the caps this finding
+    /// exists to respect.
+    /// </remarks>
+    public const string OmittedItem = "omitted-item";
+
+    /// <summary>
     /// Placeholder used when the model returned a finding with no kind. The finding is kept
     /// rather than discarded: the problem text still describes a real defect.
     /// </summary>
@@ -74,7 +91,8 @@ public static class CritiqueFindingKinds
         WrongAttribution,
         UnsupportedClaim,
         Repeat,
-        ConflictingEvent
+        ConflictingEvent,
+        OmittedItem
     ];
 }
 
@@ -89,12 +107,18 @@ public static class CritiqueFindingKinds
 /// <param name="Quote">Text copied from the draft that carries the defect. May be empty.</param>
 /// <param name="Problem">What is wrong, and which source item proves it.</param>
 /// <param name="SuggestedFix">Corrected text, or the instruction needed to fix it. May be empty.</param>
+/// <param name="SourceItemNumber">
+/// The 1-based "SOURCE ITEM N" number the finding is about. Populated (and range-checked against
+/// the source items the request carried) only for <see cref="CritiqueFindingKinds.OmittedItem"/>;
+/// <see langword="null"/> for every other kind.
+/// </param>
 public sealed record CritiqueFinding(
     CritiqueSeverity Severity,
     string Kind,
     string Quote,
     string Problem,
-    string SuggestedFix);
+    string SuggestedFix,
+    int? SourceItemNumber = null);
 
 /// <summary>
 /// Everything the critic is shown when reviewing one draft digest.

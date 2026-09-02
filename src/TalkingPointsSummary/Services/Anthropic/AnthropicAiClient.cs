@@ -82,6 +82,16 @@ internal sealed class AnthropicAiClient : IAiClient
                 "returning the partial text for the caller to accept or reject.",
                 request.ModelId, request.MaxTokens);
         }
+        else if (AiResponseRefusedException.IsRefusal(stopReason))
+        {
+            // Also reported rather than enforced, for the same reason. The text block of a refusal
+            // is prose about why the model declined, so it is never the answer that was asked for,
+            // but a categorization can fall back to its default while a digest cannot be sent.
+            _logger.LogWarning(
+                "Anthropic response for model {ModelId} stopped with stop_reason '{StopReason}'; " +
+                "the content is a refusal, not an answer.",
+                request.ModelId, stopReason);
+        }
 
         return new AiCompletionResult(text, raw, stopReason, usage);
     }
@@ -307,4 +317,38 @@ public sealed class AiResponseTruncatedException : Exception
     /// <returns><c>true</c> when the response is truncated.</returns>
     public static bool IsTruncated(string? stopReason)
         => string.Equals(stopReason, MaxTokensStopReason, StringComparison.OrdinalIgnoreCase);
+}
+
+/// <summary>
+/// Exception thrown by a call site that cannot use a model refusal in place of the answer it
+/// asked for. Like truncation, the client only reports the stop reason: a refused categorization
+/// falls back safely, while a refused digest is a paragraph of prose that must never be emailed
+/// as the week's news.
+/// </summary>
+/// <remarks>
+/// A refusal arrives as HTTP 200 with a normal-looking text block, so nothing downstream can tell
+/// it apart from a digest by inspecting the text. The stop reason is the only signal there is.
+/// </remarks>
+public sealed class AiResponseRefusedException : Exception
+{
+    /// <summary>
+    /// Stop reason the provider reports when the model declined to answer.
+    /// </summary>
+    public const string RefusalStopReason = "refusal";
+
+    /// <summary>
+    /// Initializes a new refusal exception.
+    /// </summary>
+    /// <param name="message">Explanation of which model refused and what was being generated.</param>
+    public AiResponseRefusedException(string message) : base(message)
+    {
+    }
+
+    /// <summary>
+    /// Reports whether a provider stop reason means the model declined to answer.
+    /// </summary>
+    /// <param name="stopReason">Stop reason from <see cref="AiCompletionResult.StopReason"/>.</param>
+    /// <returns><c>true</c> when the response is a refusal.</returns>
+    public static bool IsRefusal(string? stopReason)
+        => string.Equals(stopReason, RefusalStopReason, StringComparison.OrdinalIgnoreCase);
 }

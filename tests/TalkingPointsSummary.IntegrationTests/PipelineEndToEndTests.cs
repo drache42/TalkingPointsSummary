@@ -116,6 +116,71 @@ public class PipelineEndToEndTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Covers the parts of the pipeline that only exist end to end: a news item is committed, its
+    /// events are extracted against the real schema, the digest prompt is rendered from the stored
+    /// events, and delivery closes the item out.
+    /// </summary>
+    [Fact]
+    public async Task FullPipeline_ExtractsEventsRendersTheDatesAndClosesOutTheNewsItem()
+    {
+        const string summaryMarkdown =
+            "# Weekly Summary\n\nThe book fair is coming.\n\n"
+            + "## Important Upcoming Dates\n\n### Lincoln Elementary (Alice, Bob)\n"
+            + "- **Wednesday, October 14, 2026** - Book Fair (9:00 AM)\n";
+
+        _fixture.StubTalkingPointsApi([
+            CreateApiMessage("events-1", "Mrs. Teacher", "Alice", "Book Fair is on October 14 at 9:00 AM.")
+        ]);
+
+        _fixture.StubAnthropicCategorizationForMessage("events-1",
+            AnthropicStubResponse.Ok("""{"message_id":"events-1","has_newsletter_url":false,"is_news_itself":true,"summary":"Book Fair"}"""));
+
+        _fixture.StubAnthropicEventExtraction("""
+            {
+              "events": [
+                { "title": "Book Fair", "event_date": "2026-10-14", "time_text": "9:00 AM" }
+              ],
+              "cancelled_event_ids": [],
+              "reinstated_event_ids": []
+            }
+            """);
+
+        _fixture.StubAnthropicSummary(summaryMarkdown);
+
+        await using var sp = _fixture.CreateServiceProvider();
+        var pipeline = sp.GetRequiredService<WeeklyPipelineService>();
+        var result = await pipeline.TryRunFullPipelineAsync("test", _fixture.SeededParentId, CancellationToken.None);
+
+        result.Should().Be(PipelineRunStatus.Completed);
+
+        await using var scope = sp.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var trackedEvent = await db.TrackedEvents
+            .SingleAsync(e => e.ParentId == _fixture.SeededParentId);
+        trackedEvent.Title.Should().Be("Book Fair");
+        trackedEvent.EventDate.Should().Be(new DateTime(2026, 10, 14, 0, 0, 0, DateTimeKind.Utc));
+        trackedEvent.School.Should().Be("Lincoln Elementary");
+        trackedEvent.Status.Should().Be(TrackedEventStatus.Active);
+
+        var newsItem = await db.NewsItems.SingleAsync(n => n.ParentId == _fixture.SeededParentId);
+        trackedEvent.SourceNewsItemId.Should().Be(newsItem.Id);
+
+        var summary = await db.Summaries.SingleAsync(s => s.ParentId == _fixture.SeededParentId);
+
+        // The dates section is rendered in C# from the stored event and handed to the model to
+        // copy, so it has to be in the prompt rather than left for the model to reconstruct.
+        summary.Prompt.Should().Contain("- **Wednesday, October 14, 2026** - Book Fair (9:00 AM)");
+        summary.Content.Should().Be(summaryMarkdown);
+        summary.EmailSentAt.Should().NotBeNull();
+
+        // Only a delivered digest closes out the news it reported.
+        newsItem.IncludedInSummaryId.Should().Be(summary.Id);
+
+        (await _fixture.GetMailpitMessageCountAsync()).Should().Be(1);
+    }
+
+    /// <summary>
     /// Verifies that duplicate messages are not reprocessed on later runs.
     /// </summary>
     [Fact]
@@ -161,13 +226,20 @@ public class PipelineEndToEndTests : IAsyncLifetime
         var newsItems = await db.NewsItems.Where(n => n.ParentId == _fixture.SeededParentId).ToListAsync();
         newsItems.Should().HaveCount(1);
 
-        var summaries = await db.Summaries.Where(s => s.ParentId == _fixture.SeededParentId).OrderBy(s => s.CreatedAt).ToListAsync();
-        summaries.Should().HaveCount(2);
-        summaries.Should().AllSatisfy(s => s.Content.Should().Be(summaryMarkdown));
+        // Eligibility is the recorded fact that an item has not been reported yet. The first run
+        // delivered this story and stamped it, so the second run has nothing left to write about
+        // and produces no digest at all. Under the old date window it produced a second digest
+        // repeating the same story, which is the defect that stamping exists to remove.
+        newsItems[0].IncludedInSummaryId.Should().NotBeNull();
 
-        // Mailpit: both runs send a summary because the second run still sees recent news items.
+        var summaries = await db.Summaries.Where(s => s.ParentId == _fixture.SeededParentId).OrderBy(s => s.CreatedAt).ToListAsync();
+        summaries.Should().ContainSingle();
+        summaries[0].Content.Should().Be(summaryMarkdown);
+        summaries[0].EmailSentAt.Should().NotBeNull();
+        newsItems[0].IncludedInSummaryId.Should().Be(summaries[0].Id);
+
         var mailCount = await _fixture.GetMailpitMessageCountAsync();
-        mailCount.Should().Be(2);
+        mailCount.Should().Be(1, "the second run had no unreported news to send");
     }
 
     /// <summary>

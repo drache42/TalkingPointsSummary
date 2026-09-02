@@ -47,7 +47,14 @@ public enum SummaryValidationFindingKind
     /// <summary>
     /// A date names a day that does not exist in that month, for example "February 30, 2026".
     /// </summary>
-    InvalidDate
+    InvalidDate,
+
+    /// <summary>
+    /// An event from the authoritative "Important Upcoming Dates" block the model was handed does
+    /// not appear in the digest it produced. The block is a recorded fact rendered in code, so a
+    /// line missing from the output is the model having dropped or rewritten it.
+    /// </summary>
+    MissingUpcomingDate
 }
 
 /// <summary>
@@ -195,17 +202,29 @@ public sealed partial class SummaryOutputValidator
     /// The date the digest is generated and sent. Supplied by the caller rather than read from the
     /// clock so validation is deterministic. Any time component is ignored.
     /// </param>
+    /// <param name="expectedUpcomingDates">
+    /// The authoritative "Important Upcoming Dates" block the model was handed to copy, exactly as
+    /// it was rendered. When supplied, every event line in it must be reproduced in the digest.
+    /// Null skips the check, which is what a caller with no rendered block does.
+    /// </param>
     /// <returns>
-    /// Findings in document order. An empty list means no rule violations were detected.
+    /// Findings in document order, with any missing upcoming dates appended last. An empty list
+    /// means no rule violations were detected.
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="markdown"/> is null.</exception>
-    public IReadOnlyList<SummaryValidationFinding> Validate(string markdown, DateTime today)
+    public IReadOnlyList<SummaryValidationFinding> Validate(
+        string markdown,
+        DateTime today,
+        string? expectedUpcomingDates = null)
     {
         ArgumentNullException.ThrowIfNull(markdown);
 
         var findings = new List<SummaryValidationFinding>();
         if (markdown.Length == 0)
+        {
+            AddMissingUpcomingDates(findings, markdown, expectedUpcomingDates);
             return findings;
+        }
 
         var todayDate = today.Date;
         var todayText = todayDate.ToString(LongDateFormat, CultureInfo.InvariantCulture);
@@ -428,7 +447,72 @@ public sealed partial class SummaryOutputValidator
             }
         }
 
+        AddMissingUpcomingDates(findings, markdown, expectedUpcomingDates);
+
         return findings;
+    }
+
+    /// <summary>
+    /// Reports every event line from the authoritative upcoming-dates block that the digest failed
+    /// to reproduce.
+    /// </summary>
+    /// <remarks>
+    /// The block is rendered in code from tracked events precisely so the model does not have to
+    /// rebuild it, and every other check here reads the digest on its own terms: a digest that
+    /// silently drops the whole section, or two of its three lines, is internally consistent and
+    /// passes all of them. This is the only check that compares the output against what the model
+    /// was told to copy, so it is also what makes a revision that loses content score worse than
+    /// the draft rather than the same.
+    /// </remarks>
+    private static void AddMissingUpcomingDates(
+        List<SummaryValidationFinding> findings,
+        string markdown,
+        string? expectedUpcomingDates)
+    {
+        if (string.IsNullOrWhiteSpace(expectedUpcomingDates))
+            return;
+
+        var haystack = CollapseWhitespace(markdown);
+
+        foreach (Match line in UpcomingDateLinePattern().Matches(expectedUpcomingDates))
+        {
+            var date = CollapseWhitespace(line.Groups["date"].Value);
+
+            // The trailing "(6:30 PM)" is the announcement's own wording, and a model that keeps
+            // the event but writes the time differently has not lost anything. The date and the
+            // event name are the facts that have to survive.
+            var title = CollapseWhitespace(StripTrailingParenthetical(line.Groups["title"].Value));
+
+            if (date.Length == 0 || title.Length == 0)
+                continue;
+
+            if (haystack.Contains(date, StringComparison.OrdinalIgnoreCase)
+                && haystack.Contains(title, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            findings.Add(new SummaryValidationFinding(
+                SummaryValidationFindingKind.MissingUpcomingDate,
+                0,
+                $"- **{date}** - {title}",
+                $"The digest does not carry the tracked event \"{title}\" on {date}. Reproduce the "
+                + "Important Upcoming Dates section exactly as supplied, with every line."));
+        }
+    }
+
+    /// <summary>
+    /// Removes a trailing parenthetical, which in a rendered upcoming-date line is the free-text
+    /// time of day.
+    /// </summary>
+    private static string StripTrailingParenthetical(string title)
+    {
+        var trimmed = title.TrimEnd();
+        if (!trimmed.EndsWith(')'))
+            return trimmed;
+
+        var open = trimmed.LastIndexOf('(');
+        return open <= 0 ? trimmed : trimmed[..open].TrimEnd();
     }
 
     /// <summary>
@@ -619,4 +703,11 @@ public sealed partial class SummaryOutputValidator
 
     [GeneratedRegex(@"\]\([^)]*\)")]
     private static partial Regex LinkTargetPattern();
+
+    /// <summary>
+    /// One event line of a rendered upcoming-dates block, as
+    /// <see cref="SummaryPromptBuilder.BuildUpcomingDates"/> writes it.
+    /// </summary>
+    [GeneratedRegex(@"^\s*-\s*\*\*(?<date>[^*]+)\*\*\s*-\s*(?<title>.+?)\s*$", RegexOptions.Multiline)]
+    private static partial Regex UpcomingDateLinePattern();
 }

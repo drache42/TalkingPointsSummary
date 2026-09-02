@@ -37,6 +37,26 @@ public class IntegrationTestFixture : IAsyncLifetime
 {
     private const string TestcontainersHostAlias = "host.testcontainers.internal";
 
+    /// <summary>
+    /// Model id the categorization profile, and therefore event extraction, runs under.
+    /// </summary>
+    public const string CategorizationModelId = "claude-haiku-4-5-20251001";
+
+    /// <summary>
+    /// Model id the summary and revision calls run under.
+    /// </summary>
+    public const string SummarizationModelId = "claude-sonnet-4-5-20250929";
+
+    /// <summary>
+    /// Model id the critique call runs under, distinct so the stub matcher can tell it apart.
+    /// </summary>
+    public const string CritiqueModelId = "claude-opus-4-1-20250805";
+
+    /// <summary>
+    /// Phrase unique to the event extraction prompt, used to route that call to its own stub.
+    /// </summary>
+    private const string EventExtractionPromptMarker = "The news item below was sent on";
+
     private PostgreSqlContainer _postgres = null!;
     private IContainer _mailpit = null!;
     private IContainer _browserless = null!;
@@ -227,6 +247,7 @@ public class IntegrationTestFixture : IAsyncLifetime
         await using var scope = serviceProvider.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         await db.Database.ExecuteSqlRawAsync("TRUNCATE TABLE \"PipelineRuns\" CASCADE");
+        await db.Database.ExecuteSqlRawAsync("TRUNCATE TABLE \"TrackedEvents\" CASCADE");
         await db.Database.ExecuteSqlRawAsync("TRUNCATE TABLE \"Summaries\" CASCADE");
         await db.Database.ExecuteSqlRawAsync("TRUNCATE TABLE \"NewsItems\" CASCADE");
         await db.Database.ExecuteSqlRawAsync("TRUNCATE TABLE \"Messages\" CASCADE");
@@ -255,8 +276,12 @@ public class IntegrationTestFixture : IAsyncLifetime
             Anthropic = new AnthropicProviderOptions { ApiKey = "test-anthropic-key" },
             Profiles = new AiProfilesOptions
             {
-                Categorization = new AiProfileOptions { ModelId = "claude-haiku-4-5-20251001", MaxTokens = 1024 },
-                Summarization = new AiProfileOptions { ModelId = "claude-sonnet-4-5-20250929", MaxTokens = 8192 },
+                Categorization = new AiProfileOptions { ModelId = CategorizationModelId, MaxTokens = 1024 },
+                Summarization = new AiProfileOptions { ModelId = SummarizationModelId, MaxTokens = 8192 },
+                // Given its own model id so critique requests are told apart from summary requests
+                // by the stub matcher. Left on the shipped default they would fall through to an
+                // unstubbed 404, which the critic swallows, and the review pass would never run.
+                Critique = new AiProfileOptions { ModelId = CritiqueModelId, MaxTokens = 8192 },
                 Validation = new AiProfileOptions { ModelId = "claude-haiku-3-5-20241022", MaxTokens = 1 }
             }
         }));
@@ -311,6 +336,12 @@ public class IntegrationTestFixture : IAsyncLifetime
         services.AddSingleton<IMarkdownConverter, MarkdownConverter>();
         services.AddScoped<IEmailSender, EmailSender>();
         services.AddScoped<IMessageCategorizer, MessageCategorizer>();
+        // The orchestrator takes these three as well. Registered here so the composition root the
+        // end-to-end tests run through matches the worker's, rather than failing to resolve the
+        // orchestrator at all.
+        services.AddSingleton<SummaryOutputValidator>();
+        services.AddScoped<IEventExtractor, EventExtractor>();
+        services.AddScoped<ISummaryCritic, SummaryCritic>();
         services.AddScoped<ISummaryGenerator, SummaryGenerator>();
         services.AddParentChildServices();
         services.AddScoped<PipelineOrchestrator>();
@@ -366,6 +397,67 @@ public class IntegrationTestFixture : IAsyncLifetime
                 .WithStatusCode(200)
                 .WithHeader("Content-Type", "application/json")
                 .WithBody(JsonSerializer.Serialize(anthropicResponse)));
+
+        StubAnthropicEventExtraction();
+    }
+
+    /// <summary>
+    /// Stubs the Anthropic event extraction call, which runs on the categorization profile.
+    /// </summary>
+    /// <remarks>
+    /// It needs its own mapping because it shares a model id with categorization but sends a
+    /// completely different prompt and expects a completely different JSON shape. Without one, the
+    /// extraction call is served a categorization payload, or 404s and is swallowed.
+    /// </remarks>
+    /// <param name="jsonPayload">Extraction JSON to return; defaults to no events.</param>
+    public void StubAnthropicEventExtraction(string? jsonPayload = null)
+    {
+        var payload = jsonPayload
+            ?? """{ "events": [], "cancelled_event_ids": [], "reinstated_event_ids": [] }""";
+
+        var anthropicResponse = new
+        {
+            content = new[]
+            {
+                new { type = "text", text = payload }
+            }
+        };
+
+        _wireMock
+            .Given(Request.Create()
+                .WithPath("/v1/messages")
+                .UsingPost()
+                .WithBody(new WildcardMatcher($"*{CategorizationModelId}*"))
+                .WithBody(new WildcardMatcher($"*{EventExtractionPromptMarker}*")))
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody(JsonSerializer.Serialize(anthropicResponse)));
+    }
+
+    /// <summary>
+    /// Stubs the Anthropic critique call that reviews a generated digest.
+    /// </summary>
+    /// <param name="jsonPayload">Critique JSON to return; defaults to no findings.</param>
+    public void StubAnthropicCritique(string? jsonPayload = null)
+    {
+        var anthropicResponse = new
+        {
+            content = new[]
+            {
+                new { type = "text", text = jsonPayload ?? """{ "findings": [] }""" }
+            }
+        };
+
+        _wireMock
+            .Given(Request.Create()
+                .WithPath("/v1/messages")
+                .UsingPost()
+                .WithBody(new WildcardMatcher($"*{CritiqueModelId}*")))
+            .RespondWith(Response.Create()
+                .WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody(JsonSerializer.Serialize(anthropicResponse)));
     }
 
     /// <summary>
@@ -373,10 +465,12 @@ public class IntegrationTestFixture : IAsyncLifetime
     /// </summary>
     public void StubAnthropicCategorizationForMessage(string messageId, AnthropicStubResponse response)
     {
+        StubAnthropicEventExtraction();
+
         var request = Request.Create()
             .WithPath("/v1/messages")
             .UsingPost()
-            .WithBody(new WildcardMatcher("*claude-haiku-4-5-20251001*"))
+            .WithBody(new WildcardMatcher($"*{CategorizationModelId}*"))
             .WithBody(new WildcardMatcher($"*MessageID: {messageId}*"));
 
         if (response.IsError)
@@ -422,11 +516,15 @@ public class IntegrationTestFixture : IAsyncLifetime
             .Given(Request.Create()
                 .WithPath("/v1/messages")
                 .UsingPost()
-                .WithBody(new WildcardMatcher("*claude-sonnet-4-5-20250929*")))
+                .WithBody(new WildcardMatcher($"*{SummarizationModelId}*")))
             .RespondWith(Response.Create()
                 .WithStatusCode(200)
                 .WithHeader("Content-Type", "application/json")
                 .WithBody(JsonSerializer.Serialize(anthropicResponse)));
+
+        // Every generated digest is reviewed before it is sent, so a test that stubs a summary has
+        // to stub the review too or the critic call 404s and is silently swallowed.
+        StubAnthropicCritique();
     }
 
     /// <summary>

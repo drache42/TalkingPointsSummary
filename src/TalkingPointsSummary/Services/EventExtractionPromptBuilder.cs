@@ -16,9 +16,26 @@ public sealed class EventExtractionPromptBuilder
     private const string FromNameToken = "{{FROM_NAME}}";
     private const string NewsContentToken = "{{NEWS_CONTENT}}";
     private const string ExistingEventsToken = "{{EXISTING_EVENTS}}";
+    private const string CancelledEventsToken = "{{CANCELLED_EVENTS}}";
 
     private const int CalendarDaysBefore = 7;
     private const int CalendarDaysAfter = 120;
+
+    /// <summary>
+    /// Per-item character budget applied to the news content.
+    /// </summary>
+    /// <remarks>
+    /// Scraped newsletter text has no upper bound, and the largest scrapes are exactly the ones
+    /// carrying a school calendar. Sent whole, one of them overruns the request limit, the call
+    /// fails, and every date in it is lost with no way to ask again. A generous cap keeps the
+    /// densest part of the page and turns a total loss into a partial one. It is far larger than
+    /// the digest's own per-item budget because dates are scattered through a newsletter rather
+    /// than summarized at the top of it.
+    /// </remarks>
+    public const int MaxNewsContentChars = 40000;
+
+    private const string TruncationNoticeFormat =
+        "\n[... truncated: {0} of {1} characters omitted from this news item ...]";
 
     private static readonly Lazy<string> DefaultTemplate = new(LoadDefaultTemplate);
 
@@ -56,16 +73,22 @@ public sealed class EventExtractionPromptBuilder
     /// <param name="newsItem">News item whose content is scanned for dated events.</param>
     /// <param name="school">School the news item belongs to.</param>
     /// <param name="activeEvents">Events already tracked as active for that parent and school.</param>
+    /// <param name="cancelledEvents">
+    /// Events already tracked as cancelled, listed so the model can name one as reinstated when
+    /// the news item states outright that it is back on.
+    /// </param>
     /// <param name="timeZone">Timezone the school and its families read dates in.</param>
     public string Build(
         NewsItem newsItem,
         string school,
         IReadOnlyList<TrackedEvent> activeEvents,
+        IReadOnlyList<TrackedEvent> cancelledEvents,
         TimeZoneInfo timeZone)
     {
         ArgumentNullException.ThrowIfNull(newsItem);
         ArgumentNullException.ThrowIfNull(school);
         ArgumentNullException.ThrowIfNull(activeEvents);
+        ArgumentNullException.ThrowIfNull(cancelledEvents);
         ArgumentNullException.ThrowIfNull(timeZone);
 
         var sentUtc = DateTime.SpecifyKind(newsItem.SentAt, DateTimeKind.Utc);
@@ -77,9 +100,30 @@ public sealed class EventExtractionPromptBuilder
         prompt = prompt.Replace(SchoolToken, school, StringComparison.Ordinal);
         prompt = prompt.Replace(StudentNameToken, newsItem.StudentName, StringComparison.Ordinal);
         prompt = prompt.Replace(FromNameToken, newsItem.FromName, StringComparison.Ordinal);
-        prompt = prompt.Replace(NewsContentToken, newsItem.NewsContent, StringComparison.Ordinal);
+        prompt = prompt.Replace(NewsContentToken, ApplyCharBudget(newsItem.NewsContent), StringComparison.Ordinal);
         prompt = prompt.Replace(ExistingEventsToken, BuildExistingEvents(activeEvents), StringComparison.Ordinal);
+        prompt = prompt.Replace(CancelledEventsToken, BuildExistingEvents(cancelledEvents), StringComparison.Ordinal);
         return prompt;
+    }
+
+    /// <summary>
+    /// Caps the news content, stating plainly how much was dropped so the model does not read a
+    /// mid-sentence stop as the end of the newsletter.
+    /// </summary>
+    private static string ApplyCharBudget(string? content)
+    {
+        if (string.IsNullOrEmpty(content) || content.Length <= MaxNewsContentChars)
+            return content ?? string.Empty;
+
+        var cut = MaxNewsContentChars;
+        if (char.IsHighSurrogate(content[cut - 1]))
+            cut--;
+
+        var omitted = (content.Length - cut).ToString(CultureInfo.InvariantCulture);
+        var total = content.Length.ToString(CultureInfo.InvariantCulture);
+
+        return content[..cut]
+            + string.Format(CultureInfo.InvariantCulture, TruncationNoticeFormat, omitted, total);
     }
 
     /// <summary>

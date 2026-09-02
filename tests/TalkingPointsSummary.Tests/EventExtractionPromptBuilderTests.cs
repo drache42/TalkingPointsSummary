@@ -52,7 +52,7 @@ public class EventExtractionPromptBuilderTests
             {{DATE_REFERENCE}}
             """);
 
-        var prompt = builder.Build(SampleNewsItem(), "Maple Elementary", [], SchoolTimeZone);
+        var prompt = builder.Build(SampleNewsItem(), "Maple Elementary", [], [], SchoolTimeZone);
 
         prompt.Should().NotContain("{{");
         prompt.Should().Contain("Anchor: Monday, March 2, 2026");
@@ -67,7 +67,7 @@ public class EventExtractionPromptBuilderTests
     {
         var builder = new EventExtractionPromptBuilder("[{{EXISTING_EVENTS}}]");
 
-        var prompt = builder.Build(SampleNewsItem(), "Maple Elementary", [], SchoolTimeZone);
+        var prompt = builder.Build(SampleNewsItem(), "Maple Elementary", [], [], SchoolTimeZone);
 
         // An empty string would leave the "Refer to these by their numeric id:" header of the
         // shipped template dangling with nothing under it.
@@ -86,7 +86,7 @@ public class EventExtractionPromptBuilderTests
             SampleEvent(13, new DateTime(2026, 3, 26, 0, 0, 0, DateTimeKind.Utc), "Book Fair", "6:30 PM")
         };
 
-        var prompt = builder.Build(SampleNewsItem(), "Maple Elementary", events, SchoolTimeZone);
+        var prompt = builder.Build(SampleNewsItem(), "Maple Elementary", events, [], SchoolTimeZone);
 
         prompt.Should().Be(string.Join(Environment.NewLine,
             "- id 11: 2026-03-20 (no time given) Spring Concert",
@@ -99,7 +99,7 @@ public class EventExtractionPromptBuilderTests
     {
         var builder = new EventExtractionPromptBuilder("{{DATE_REFERENCE}}");
 
-        var prompt = builder.Build(SampleNewsItem(), "Maple Elementary", [], SchoolTimeZone);
+        var prompt = builder.Build(SampleNewsItem(), "Maple Elementary", [], [], SchoolTimeZone);
 
         // A week of history is enough to resolve "last Friday" in a newsletter that arrived late.
         prompt.Should().StartWith("- 2026-02-23 = Monday, February 23, 2026");
@@ -122,7 +122,7 @@ public class EventExtractionPromptBuilderTests
         var lateEvening = SampleNewsItem();
         lateEvening.SentAt = new DateTime(2026, 3, 2, 23, 59, 0, DateTimeKind.Utc);
 
-        var prompt = builder.Build(lateEvening, "Maple Elementary", [], SchoolTimeZone);
+        var prompt = builder.Build(lateEvening, "Maple Elementary", [], [], SchoolTimeZone);
 
         prompt.Should().StartWith("Monday, March 2, 2026|");
         prompt.Should().Contain("- 2026-03-02 = Monday, March 2, 2026");
@@ -139,7 +139,7 @@ public class EventExtractionPromptBuilderTests
         var evening = SampleNewsItem();
         evening.SentAt = new DateTime(2026, 3, 3, 0, 0, 0, DateTimeKind.Utc);
 
-        var prompt = builder.Build(evening, "Maple Elementary", [], SchoolTimeZone);
+        var prompt = builder.Build(evening, "Maple Elementary", [], [], SchoolTimeZone);
 
         prompt.Should().StartWith("Monday, March 2, 2026|");
         prompt.Should().Contain("- 2026-03-03 = Tuesday, March 3, 2026");
@@ -154,7 +154,7 @@ public class EventExtractionPromptBuilderTests
         evening.SentAt = new DateTime(2026, 3, 3, 0, 0, 0, DateTimeKind.Utc);
 
         // The same instant is already Tuesday for a school that keeps UTC.
-        builder.Build(evening, "Maple Elementary", [], TimeZoneInfo.Utc)
+        builder.Build(evening, "Maple Elementary", [], [], TimeZoneInfo.Utc)
             .Should().Be("Tuesday, March 3, 2026");
     }
 
@@ -163,14 +163,16 @@ public class EventExtractionPromptBuilderTests
     {
         var builder = new EventExtractionPromptBuilder("{{SCHOOL}}");
 
-        var nullNewsItem = () => builder.Build(null!, "Maple Elementary", [], SchoolTimeZone);
-        var nullSchool = () => builder.Build(SampleNewsItem(), null!, [], SchoolTimeZone);
-        var nullEvents = () => builder.Build(SampleNewsItem(), "Maple Elementary", null!, SchoolTimeZone);
-        var nullTimeZone = () => builder.Build(SampleNewsItem(), "Maple Elementary", [], null!);
+        var nullNewsItem = () => builder.Build(null!, "Maple Elementary", [], [], SchoolTimeZone);
+        var nullSchool = () => builder.Build(SampleNewsItem(), null!, [], [], SchoolTimeZone);
+        var nullEvents = () => builder.Build(SampleNewsItem(), "Maple Elementary", null!, [], SchoolTimeZone);
+        var nullCancelled = () => builder.Build(SampleNewsItem(), "Maple Elementary", [], null!, SchoolTimeZone);
+        var nullTimeZone = () => builder.Build(SampleNewsItem(), "Maple Elementary", [], [], null!);
 
         nullNewsItem.Should().Throw<ArgumentNullException>();
         nullSchool.Should().Throw<ArgumentNullException>();
         nullEvents.Should().Throw<ArgumentNullException>();
+        nullCancelled.Should().Throw<ArgumentNullException>();
         nullTimeZone.Should().Throw<ArgumentNullException>();
     }
 
@@ -181,12 +183,76 @@ public class EventExtractionPromptBuilderTests
             SampleNewsItem(),
             "Maple Elementary",
             [SampleEvent(11, new DateTime(2026, 3, 20, 0, 0, 0, DateTimeKind.Utc), "Spring Concert", "6:30 PM")],
+            [],
             SchoolTimeZone);
 
         prompt.Should().NotContain("{{");
         prompt.Should().Contain("The news item below was sent on Monday, March 2, 2026.");
         prompt.Should().Contain("\"event_date\": \"YYYY-MM-DD\"");
         prompt.Should().Contain("- id 11: 2026-03-20 (6:30 PM) Spring Concert");
+    }
+
+    /// <summary>
+    /// A cancelled event is only ever revived when the model names its id, and it cannot name an id
+    /// it was never shown. The shipped template has to carry the list and the rule that guards it.
+    /// </summary>
+    [Fact]
+    public void DefaultTemplate_ListsCancelledEventsAndAsksForDeliberateReinstatementsOnly()
+    {
+        var cancelled = SampleEvent(
+            21, new DateTime(2026, 5, 15, 0, 0, 0, DateTimeKind.Utc), "Field Day", timeText: null);
+        cancelled.Status = TrackedEventStatus.Cancelled;
+
+        var prompt = new EventExtractionPromptBuilder().Build(
+            SampleNewsItem(), "Maple Elementary", [], [cancelled], SchoolTimeZone);
+
+        prompt.Should().NotContain("{{");
+        prompt.Should().Contain("- id 21: 2026-05-15 (no time given) Field Day");
+        prompt.Should().Contain("\"reinstated_event_ids\": []");
+
+        // Without this instruction the model reads a reprinted monthly calendar as a reinstatement,
+        // which is the whole reason a re-announcement no longer revives a cancelled row by itself.
+        prompt.Should().Contain("is NOT a reinstatement");
+    }
+
+    [Fact]
+    public void Build_NoCancelledEvents_RendersAnExplicitNonePlaceholder()
+    {
+        var builder = new EventExtractionPromptBuilder("[{{CANCELLED_EVENTS}}]");
+
+        builder.Build(SampleNewsItem(), "Maple Elementary", [], [], SchoolTimeZone)
+            .Should().Be("[None]");
+    }
+
+    /// <summary>
+    /// Scraped newsletter text is unbounded and the biggest scrapes are the ones carrying a term
+    /// calendar. Sent whole, one of them overruns the request limit and every date in it is lost
+    /// with no retry, because the news item is already stored and never revisited.
+    /// </summary>
+    [Fact]
+    public void Build_NewsContentLongerThanTheBudget_IsCappedAndSaysHowMuchWasDropped()
+    {
+        var builder = new EventExtractionPromptBuilder("{{NEWS_CONTENT}}");
+
+        var oversized = SampleNewsItem();
+        var overflow = EventExtractionPromptBuilder.MaxNewsContentChars + 500;
+        oversized.NewsContent = new string('x', overflow);
+
+        var prompt = builder.Build(oversized, "Maple Elementary", [], [], SchoolTimeZone);
+
+        prompt.Length.Should().BeLessThan(overflow);
+        prompt.Should().StartWith(new string('x', EventExtractionPromptBuilder.MaxNewsContentChars));
+        prompt.Should().Contain("truncated: 500 of " + overflow.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public void Build_NewsContentInsideTheBudget_IsSentWhole()
+    {
+        var builder = new EventExtractionPromptBuilder("{{NEWS_CONTENT}}");
+
+        var prompt = builder.Build(SampleNewsItem(), "Maple Elementary", [], [], SchoolTimeZone);
+
+        prompt.Should().Be("Book fair is this Thursday.");
     }
 
     private static NewsItem SampleNewsItem() => new()

@@ -50,4 +50,11 @@ public class CritiqueJsonFinding
     /// </summary>
     [JsonPropertyName("suggested_fix")]
     public string? SuggestedFix { get; set; }
+
+    /// <summary>
+    /// The 1-based "SOURCE ITEM N" number, required by the prompt only for an
+    /// <see cref="CritiqueFindingKinds.OmittedItem"/> finding.
+    /// </summary>
+    [JsonPropertyName("source_item_number")]
+    public int? SourceItemNumber { get; set; }
 }

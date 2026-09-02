@@ -18,6 +18,10 @@ News content:
 Events already tracked for this school (status Active). Refer to these by their numeric id:
 {{EXISTING_EVENTS}}
 
+Events already tracked for this school that were CANCELLED earlier. They are not shown to parents
+any more. Refer to these by their numeric id:
+{{CANCELLED_EVENTS}}
+
 Respond with this exact JSON structure:
 {
   "events": [
@@ -28,7 +32,8 @@ Respond with this exact JSON structure:
       "replaces_event_id": null
     }
   ],
-  "cancelled_event_ids": []
+  "cancelled_event_ids": [],
+  "reinstated_event_ids": []
 }
 
 Rules:
@@ -44,7 +49,13 @@ Rules:
   for a brand new event. Only use an id from the tracked list above.
 * `cancelled_event_ids`: list the ids of existing tracked events this news item cancels outright.
   A cancelled event does not also belong in `events`.
+* `reinstated_event_ids`: list the ids of already-cancelled events, from the cancelled list above,
+  that this news item states are back on. Use it ONLY when the text says so directly, for example
+  "the Field Day we cancelled is back on" or "Field Day has been reinstated for May 15". A
+  calendar, a schedule, or a listing that simply mentions the event again is NOT a reinstatement:
+  schools reprint standing calendars that still carry events they have called off. When in doubt,
+  leave the list empty.
 * If the news item announces an event that already appears in the tracked list with the same
   title and the same date, emit it anyway. Duplicates are removed downstream.
-* If the news item contains no dated events, return an empty `events` list and an empty
-  `cancelled_event_ids` list.
+* If the news item contains no dated events, return an empty `events` list, an empty
+  `cancelled_event_ids` list, and an empty `reinstated_event_ids` list.

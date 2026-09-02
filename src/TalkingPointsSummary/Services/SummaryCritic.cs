@@ -135,6 +135,18 @@ public partial class SummaryCritic : ISummaryCritic
             return NoFindings;
         }
 
+        if (AiResponseRefusedException.IsRefusal(aiResult.StopReason))
+        {
+            // A refusal's text block is prose about declining, not a findings document. Parsing it
+            // would fail anyway; saying so plainly keeps the log honest about why the digest went
+            // out unreviewed.
+            _logger.LogWarning(
+                "Model {Model} refused to critique the draft digest (stop reason '{StopReason}'); "
+                + "proceeding with the draft digest unreviewed.",
+                _options.Profiles.Critique.ModelId, aiResult.StopReason);
+            return NoFindings;
+        }
+
         if (string.IsNullOrWhiteSpace(aiResult.Text))
         {
             // Observed in practice: a response whose first content block is a thinking block with
@@ -146,10 +158,10 @@ public partial class SummaryCritic : ISummaryCritic
             return NoFindings;
         }
 
-        return ParseFindings(aiResult.Text);
+        return ParseFindings(aiResult.Text, request.SourceItems.Count);
     }
 
-    private IReadOnlyList<CritiqueFinding> ParseFindings(string rawText)
+    private IReadOnlyList<CritiqueFinding> ParseFindings(string rawText, int sourceItemCount)
     {
         var text = StripCodeFences().Replace(rawText, "").Trim();
 
@@ -185,12 +197,40 @@ public partial class SummaryCritic : ISummaryCritic
             if (string.IsNullOrEmpty(problem))
                 continue;
 
+            var kind = NormalizeKind(candidate.Kind);
+
+            // An omitted-item finding is useless without a source item number the orchestrator can
+            // trust: it is the only thing that tells it which news item to leave unreported so the
+            // item survives into next week's digest rather than being marked delivered for content
+            // the parent never received. A number outside the range of source items this request
+            // carried is a hallucination, not a real reference, so the finding is dropped entirely
+            // rather than risk misfiling a completely different item as omitted.
+            int? sourceItemNumber = null;
+            if (kind == CritiqueFindingKinds.OmittedItem)
+            {
+                if (candidate.SourceItemNumber is not int number
+                    || number < 1
+                    || number > sourceItemCount)
+                {
+                    _logger.LogWarning(
+                        "Discarding an omitted-item critique finding with an unusable source item "
+                        + "number {SourceItemNumber} against {SourceItemCount} source item(s).",
+                        candidate.SourceItemNumber, sourceItemCount);
+                    continue;
+                }
+
+                sourceItemNumber = number;
+            }
+
             findings.Add(new CritiqueFinding(
-                ParseSeverity(candidate.Severity),
-                NormalizeKind(candidate.Kind),
+                // Forced rather than trusted: an omitted item is bookkeeping, not a defect, and
+                // must never be able to trigger a revision attempt by arriving as high or medium.
+                kind == CritiqueFindingKinds.OmittedItem ? CritiqueSeverity.Low : ParseSeverity(candidate.Severity),
+                kind,
                 candidate.Quote?.Trim() ?? string.Empty,
                 problem,
-                candidate.SuggestedFix?.Trim() ?? string.Empty));
+                candidate.SuggestedFix?.Trim() ?? string.Empty,
+                sourceItemNumber));
         }
 
         _logger.LogInformation(

@@ -109,13 +109,22 @@ public partial class EventExtractor : IEventExtractor
             .OrderBy(trackedEvent => trackedEvent.EventDate)
             .ToList();
 
-        var response = await RequestExtractionAsync(newsItem, school, activeEvents, ct);
+        var cancelledEvents = schoolEvents
+            .Where(trackedEvent => trackedEvent.Status == TrackedEventStatus.Cancelled)
+            .OrderBy(trackedEvent => trackedEvent.EventDate)
+            .ToList();
+
+        var response = await RequestExtractionAsync(newsItem, school, activeEvents, cancelledEvents, ct);
         if (response is null)
             return Array.Empty<TrackedEvent>();
 
+        // Reinstatements are applied first so a row the news item brings back is already active
+        // when the duplicate scan below meets it again in the events list.
+        var reinstatedByRequest = ApplyReinstatements(response, newsItem, schoolEvents, activeEvents);
+
         var batch = CreateNewEvents(newsItem, school, response, schoolEvents, activeEvents);
 
-        if (batch.Created.Count > 0 || batch.Reinstated)
+        if (batch.Created.Count > 0 || batch.Reinstated || reinstatedByRequest)
             await _db.SaveChangesAsync(ct);
 
         var statusChanged = ApplyReplacements(batch.Replacements);
@@ -135,9 +144,10 @@ public partial class EventExtractor : IEventExtractor
         NewsItem newsItem,
         string school,
         IReadOnlyList<TrackedEvent> activeEvents,
+        IReadOnlyList<TrackedEvent> cancelledEvents,
         CancellationToken ct)
     {
-        var prompt = PromptBuilder.Build(newsItem, school, activeEvents, _scheduleTimeZone);
+        var prompt = PromptBuilder.Build(newsItem, school, activeEvents, cancelledEvents, _scheduleTimeZone);
         var profile = _options.Profiles.Categorization;
 
         var aiResult = await _aiClient.CompleteAsync(
@@ -216,42 +226,30 @@ public partial class EventExtractor : IEventExtractor
                     "Skipping duplicate event '{Title}' on {EventDate:yyyy-MM-dd} at {School}",
                     title, eventDate, school);
 
-                // Neither a cancellation nor a supersession is a one-way door. The model is only
-                // ever shown active rows, so it cannot name an inactive one in replaces_event_id
-                // and can only re-announce a revived event as if it were new. Without this the row
-                // stays inactive forever and the event never reaches Important Upcoming Dates
-                // again. A response that announces and cancels the same event in one breath is
-                // left to the cancellation.
-                if (duplicate.Status != TrackedEventStatus.Active
+                // A supersession is inferred from a date move, never stated outright, so a later
+                // news item putting the event back on its original date is exactly the evidence
+                // needed to undo it. The model can only ever express that as a plain
+                // re-announcement, because it is never shown inactive rows.
+                if (duplicate.Status == TrackedEventStatus.Superseded
                     && cancelledIds?.Contains(duplicate.Id) != true)
                 {
-                    // A superseded row was displaced by a later date. Re-announcing the original
-                    // date moves the event back, so the row that displaced it has to give way in
-                    // the same breath: leaving both Active would render the event twice, on two
-                    // different dates, which is the conflicting-event defect the critic hunts for.
-                    if (duplicate.Status == TrackedEventStatus.Superseded
-                        && duplicate.SupersededByEventId is int successorId)
-                    {
-                        var successor = schoolEvents.FirstOrDefault(existing => existing.Id == successorId);
-                        if (successor is not null && successor.Status == TrackedEventStatus.Active)
-                        {
-                            _logger.LogInformation(
-                                "Event {SuccessorId} superseded by {EventId}, which news item {NewsItemId} moved back",
-                                successor.Id, duplicate.Id, newsItem.Id);
-
-                            successor.Status = TrackedEventStatus.Superseded;
-                            successor.SupersededByEventId = duplicate.Id;
-                        }
-                    }
-
-                    _logger.LogInformation(
-                        "Event {EventId} reinstated from {PreviousStatus} because news item {NewsItemId} announces it again",
-                        duplicate.Id, duplicate.Status, newsItem.Id);
-
-                    duplicate.Status = TrackedEventStatus.Active;
-                    duplicate.SupersededByEventId = null;
-                    duplicate.SourceNewsItemId = newsItem.Id;
+                    ReinstateEvent(duplicate, newsItem, schoolEvents);
                     reinstated = true;
+                }
+                else if (duplicate.Status == TrackedEventStatus.Cancelled)
+                {
+                    // A cancellation is a positive statement that the event is off, and a
+                    // re-announcement is not evidence that it was called back on. School
+                    // newsletters reprint a standing monthly calendar, which re-announces every
+                    // event on it, cancelled ones included, and nothing in that text tells the
+                    // model the difference. Reviving here would put a cancelled event back into
+                    // Important Upcoming Dates every week until its date passed, so a genuine
+                    // reinstatement has to arrive through reinstated_event_ids, where the model is
+                    // shown the cancelled row and has to name it deliberately.
+                    _logger.LogInformation(
+                        "Event {EventId} is re-announced by news item {NewsItemId} but stays cancelled; "
+                        + "a cancelled event is only revived when the model names it in reinstated_event_ids",
+                        duplicate.Id, newsItem.Id);
                 }
 
                 // The row is a duplicate but the supersession it carries is not: a moved event can
@@ -280,6 +278,115 @@ public partial class EventExtractor : IEventExtractor
         }
 
         return new ExtractionBatch(created, replacements, reinstated);
+    }
+
+    /// <summary>
+    /// Brings an inactive row back and retires whatever row is currently standing in for it.
+    /// </summary>
+    /// <remarks>
+    /// An event can be moved more than once: March 20 is superseded by March 27, which is itself
+    /// superseded by April 3. Only the last row in that chain is still active, so demoting just the
+    /// row the revived one points at would leave the chain's live tail active alongside it and
+    /// render the same event on two different dates, which is the conflicting-event defect the
+    /// critic hunts for. The chain is walked to its live end instead, and the visited set stops a
+    /// corrupted chain that loops back on itself from spinning.
+    /// </remarks>
+    /// <param name="revived">Row being brought back to active.</param>
+    /// <param name="newsItem">News item that brought it back.</param>
+    /// <param name="schoolEvents">Every tracked row for this parent and school, any status.</param>
+    private void ReinstateEvent(TrackedEvent revived, NewsItem newsItem, List<TrackedEvent> schoolEvents)
+    {
+        var visited = new HashSet<int> { revived.Id };
+        var nextId = revived.SupersededByEventId;
+
+        while (nextId is int successorId && visited.Add(successorId))
+        {
+            var successor = schoolEvents.FirstOrDefault(existing => existing.Id == successorId);
+            if (successor is null)
+                break;
+
+            if (successor.Status == TrackedEventStatus.Active)
+            {
+                _logger.LogInformation(
+                    "Event {SuccessorId} superseded by {EventId}, which news item {NewsItemId} moved back",
+                    successor.Id, revived.Id, newsItem.Id);
+
+                successor.Status = TrackedEventStatus.Superseded;
+                successor.SupersededByEventId = revived.Id;
+                break;
+            }
+
+            nextId = successor.SupersededByEventId;
+        }
+
+        _logger.LogInformation(
+            "Event {EventId} reinstated from {PreviousStatus} because news item {NewsItemId} announces it again",
+            revived.Id, revived.Status, newsItem.Id);
+
+        revived.Status = TrackedEventStatus.Active;
+        revived.SupersededByEventId = null;
+        revived.SourceNewsItemId = newsItem.Id;
+    }
+
+    /// <summary>
+    /// Applies the reinstatements the model named outright, the only way a cancelled event comes
+    /// back.
+    /// </summary>
+    /// <remarks>
+    /// The cancelled rows are listed in the prompt for exactly this purpose, so the model can say
+    /// "this news item states the cancelled Field Day is back on" instead of the pipeline having to
+    /// infer it from a re-announcement that a reprinted calendar produces every month.
+    /// </remarks>
+    /// <returns><c>true</c> when at least one row changed status.</returns>
+    private bool ApplyReinstatements(
+        EventExtractionJsonResponse response,
+        NewsItem newsItem,
+        List<TrackedEvent> schoolEvents,
+        List<TrackedEvent> activeEvents)
+    {
+        var reinstatedIds = response.ReinstatedEventIds;
+        if (reinstatedIds is not { Count: > 0 })
+            return false;
+
+        var cancelledIds = response.CancelledEventIds is { Count: > 0 } ids
+            ? new HashSet<int>(ids)
+            : null;
+
+        var changed = false;
+
+        foreach (var reinstatedId in reinstatedIds)
+        {
+            var target = schoolEvents.FirstOrDefault(existing => existing.Id == reinstatedId);
+
+            if (target is null || target.Status == TrackedEventStatus.Active)
+            {
+                _logger.LogDebug(
+                    "Ignoring reinstates reference to unknown or already active event {EventId}", reinstatedId);
+                continue;
+            }
+
+            // A response that reinstates and cancels the same event contradicts itself. The
+            // cancellation wins, exactly as it does for a re-announcement.
+            if (cancelledIds?.Contains(reinstatedId) == true)
+            {
+                _logger.LogInformation(
+                    "Event {EventId} is both reinstated and cancelled by news item {NewsItemId}; "
+                    + "the cancellation wins",
+                    reinstatedId, newsItem.Id);
+                continue;
+            }
+
+            ReinstateEvent(target, newsItem, schoolEvents);
+
+            // Now that it is active again it is a legitimate target for a supersession or a
+            // cancellation declared later in the same response.
+            if (!activeEvents.Contains(target))
+                activeEvents.Add(target);
+
+            changed = true;
+        }
+
+        return changed;
     }
 
     /// <summary>
@@ -445,12 +552,24 @@ public partial class EventExtractor : IEventExtractor
         => trackedEvent.EventDate.Date == eventDate.Date
             && string.Equals(trackedEvent.Title, title, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Cuts a value to the mapped column width without splitting a surrogate pair.
+    /// </summary>
+    /// <remarks>
+    /// A title carrying an emoji stores that glyph as two chars. Cutting between them leaves a lone
+    /// surrogate, which is not valid UTF-8: the insert then fails at the driver, and because
+    /// extraction runs on a context shared by the whole run, that failure is not local to this row.
+    /// </remarks>
     private static string? Truncate(string? value, int maxLength)
     {
-        if (string.IsNullOrEmpty(value))
+        if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
             return value;
 
-        return value.Length <= maxLength ? value : value[..maxLength];
+        var cut = maxLength;
+        if (char.IsHighSurrogate(value[cut - 1]))
+            cut--;
+
+        return value[..cut];
     }
 
     [GeneratedRegex(@"```json|```")]

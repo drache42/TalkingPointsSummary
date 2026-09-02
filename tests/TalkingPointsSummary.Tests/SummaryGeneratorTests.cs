@@ -46,12 +46,14 @@ public class SummaryGeneratorTests : IDisposable
         };
     }
 
-    private SummaryGenerator CreateGenerator(TimeProvider? timeProvider = null)
+    private SummaryGenerator CreateGenerator(TimeProvider? timeProvider = null, string? timeZone = null)
         => new(
             _mockAiClient.Object,
             _db,
             Options.Create(_aiOptions),
-            Options.Create(new PipelineScheduleOptions()),
+            Options.Create(timeZone is null
+                ? new PipelineScheduleOptions()
+                : new PipelineScheduleOptions { TimeZone = timeZone }),
             NullLogger<SummaryGenerator>.Instance,
             new GradeCalculator(),
             timeProvider);
@@ -669,6 +671,159 @@ public class SummaryGeneratorTests : IDisposable
             cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    /// <summary>
+    /// A refusal arrives as a normal HTTP 200 carrying a text block, so nothing downstream can tell
+    /// it apart from a digest: the validator finds no dates to object to in a decline, and a critic
+    /// asked to review the same content usually declines too. Left unchecked it is converted to
+    /// HTML and emailed as the week's news, and every item that fed it is marked reported.
+    /// </summary>
+    [Fact]
+    public async Task ExecutePromptAsync_ModelRefuses_ThrowsRatherThanReturningTheRefusalText()
+    {
+        _mockAiClient
+            .Setup(c => c.CompleteAsync(It.IsAny<AiCompletionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AiCompletionResult(
+                "I can't help with summarizing this content.", null, "refusal"));
+
+        var act = async () => await CreateGenerator().ExecutePromptAsync("prompt");
+
+        var assertion = await act.Should().ThrowAsync<AiResponseRefusedException>();
+        assertion.Which.Message.Should().Contain("claude-sonnet-4-5-20250929");
+    }
+
+    [Fact]
+    public async Task ReviseAsync_ModelRefuses_ReturnsNullSoTheCallerKeepsTheDraft()
+    {
+        _mockAiClient
+            .Setup(c => c.CompleteAsync(It.IsAny<AiCompletionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AiCompletionResult("I can't help with that.", null, "refusal"));
+
+        var result = await CreateGeneratorAtFixedNow().ReviseAsync(
+            new SummaryRevisionRequest("# Draft digest\nBody.", "1. Something is wrong."));
+
+        result.Should().BeNull();
+    }
+
+    /// <summary>
+    /// The caller lowers the cap after a generation stopped at the token ceiling. Without it the
+    /// same rows are selected on every run, truncate again, and the backlog never drains.
+    /// </summary>
+    [Fact]
+    public async Task BuildPromptAsync_CallerLowersTheCap_IncludesOnlyTheOldestThatManyItems()
+    {
+        var parent = await SeedParentAsync();
+        await SeedChildAsync(parent.Id);
+
+        for (var i = 0; i < 6; i++)
+        {
+            var sentAt = FixedNow.UtcDateTime.AddDays(-6 + i);
+            await SeedNewsItemAsync(parent.Id, sentAt: sentAt, createdAt: sentAt, content: $"Backlog item {i}");
+        }
+
+        var result = await CreateGeneratorAtFixedNow().BuildPromptAsync(parent, CancellationToken.None, 2);
+
+        result!.NewsItemCount.Should().Be(2);
+        result.Prompt.Should().Contain("Backlog item 0");
+        result.Prompt.Should().Contain("Backlog item 1");
+        result.Prompt.Should().NotContain("Backlog item 2");
+
+        // Nothing is dropped: the rest stay unreported and lead the next digest.
+        result.NewsItems.Should().OnlyContain(item => item.IncludedInSummaryId == null);
+    }
+
+    [Fact]
+    public async Task BuildPromptAsync_CallerAsksForMoreThanTheCap_IsClampedToTheCap()
+    {
+        var parent = await SeedParentAsync();
+        await SeedChildAsync(parent.Id);
+
+        var overflow = SummaryGenerator.MaxNewsItemsPerDigest + 5;
+        for (var i = 0; i < overflow; i++)
+        {
+            var sentAt = FixedNow.UtcDateTime.AddDays(-overflow + i);
+            await SeedNewsItemAsync(parent.Id, sentAt: sentAt, createdAt: sentAt, content: $"Backlog item {i}");
+        }
+
+        var result = await CreateGeneratorAtFixedNow()
+            .BuildPromptAsync(parent, CancellationToken.None, overflow);
+
+        result!.NewsItemCount.Should().Be(SummaryGenerator.MaxNewsItemsPerDigest);
+    }
+
+    /// <summary>
+    /// The upcoming-dates floor is the local calendar date. For any timezone behind UTC, an event
+    /// happening today drops out of the digest as soon as the clock rolls over in UTC, which is the
+    /// evening before locally: exactly when the Monday-morning digest is being prepared.
+    /// </summary>
+    [Fact]
+    public async Task BuildPromptAsync_EventDatedTodayInTheScheduleTimeZone_IsStillListed()
+    {
+        var parent = await SeedParentAsync();
+        await SeedChildAsync(parent.Id, name: "StudentOne", school: "Sample Elementary");
+        var newsItem = await SeedNewsItemAsync(parent.Id);
+
+        // 02:00 UTC on March 10 is the evening of March 9 in Los Angeles.
+        var lateEvening = new FixedTimeProvider(new DateTimeOffset(2026, 3, 10, 2, 0, 0, TimeSpan.Zero));
+
+        await SeedTrackedEventAsync(
+            parent.Id, newsItem.Id, "Sample Elementary", new DateTime(2026, 3, 9), "Today Assembly");
+        await SeedTrackedEventAsync(
+            parent.Id, newsItem.Id, "Sample Elementary", new DateTime(2026, 3, 8), "Yesterday Assembly");
+
+        var result = await CreateGenerator(lateEvening, "America/Los_Angeles").BuildPromptAsync(parent);
+
+        result!.Prompt.Should().Contain("Today Assembly");
+        result.Prompt.Should().NotContain("Yesterday Assembly");
+    }
+
+    /// <summary>
+    /// The same instant read in UTC, where March 9 has already passed. Without this the timezone
+    /// conversion above would be indistinguishable from using the raw UTC date.
+    /// </summary>
+    [Fact]
+    public async Task BuildPromptAsync_SameInstantInUtc_DropsTheEventDatedTheLocalToday()
+    {
+        var parent = await SeedParentAsync();
+        await SeedChildAsync(parent.Id, name: "StudentOne", school: "Sample Elementary");
+        var newsItem = await SeedNewsItemAsync(parent.Id);
+
+        var lateEvening = new FixedTimeProvider(new DateTimeOffset(2026, 3, 10, 2, 0, 0, TimeSpan.Zero));
+
+        await SeedTrackedEventAsync(
+            parent.Id, newsItem.Id, "Sample Elementary", new DateTime(2026, 3, 9), "Today Assembly");
+
+        var result = await CreateGenerator(lateEvening, "UTC").BuildPromptAsync(parent);
+
+        result!.Prompt.Should().NotContain("Today Assembly");
+    }
+
+    /// <summary>
+    /// A digest generated on a Sunday evening belongs to that Sunday, not to the Monday its UTC
+    /// timestamp already reads as. The coverage index is dated by school day, and dating it a day
+    /// forward tells the model a digest was sent on a day it was not.
+    /// </summary>
+    [Fact]
+    public async Task BuildPromptAsync_PriorDigestSentInTheEvening_IsIndexedOnItsLocalDate()
+    {
+        var parent = await SeedParentAsync();
+        await SeedChildAsync(parent.Id);
+        await SeedNewsItemAsync(parent.Id, content: "This week's note");
+
+        // 02:00 UTC on March 9 is the evening of March 8 in Los Angeles.
+        await SeedSummaryAsync(
+            parent.Id,
+            new DateTime(2026, 3, 9, 2, 0, 0, DateTimeKind.Utc),
+            "### Spring Concert\nTickets go on sale Monday.");
+
+        var lateEvening = new FixedTimeProvider(new DateTimeOffset(2026, 3, 10, 2, 0, 0, TimeSpan.Zero));
+
+        var result = await CreateGenerator(lateEvening, "America/Los_Angeles").BuildPromptAsync(parent);
+
+        result!.CoverageLedger.Should().Contain("2026-03-08 digest:");
+        result.CoverageLedger.Should().NotContain("2026-03-09 digest:");
+        result.Prompt.Should().Contain("Sent 2026-03-08:");
     }
 
     [Fact]

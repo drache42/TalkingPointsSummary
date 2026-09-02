@@ -82,7 +82,15 @@ public class PipelineOrchestratorTests : IDisposable
         _mockCritic.Setup(x => x.CritiqueAsync(It.IsAny<SummaryCritiqueRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
 
-        _orchestrator = new PipelineOrchestrator(
+        _orchestrator = CreateOrchestrator(new PipelineScheduleOptions().TimeZone);
+    }
+
+    /// <summary>
+    /// Builds an orchestrator over the same mocks in a chosen schedule timezone, so the local-date
+    /// conversions can be exercised somewhere other than UTC, where they are the identity.
+    /// </summary>
+    private PipelineOrchestrator CreateOrchestrator(string timeZone, TimeProvider? timeProvider = null)
+        => new(
             _db,
             _mockApiClient.Object,
             _mockDeduplicator.Object,
@@ -94,10 +102,9 @@ public class PipelineOrchestratorTests : IDisposable
             _mockCritic.Object,
             _mockMarkdownConverter.Object,
             _mockEmailSender.Object,
-            Options.Create(new PipelineScheduleOptions()),
+            Options.Create(new PipelineScheduleOptions { TimeZone = timeZone }),
             NullLogger<PipelineOrchestrator>.Instance,
-            _timeProvider);
-    }
+            timeProvider ?? _timeProvider);
 
     [Fact]
     public async Task RunAsync_SummaryGeneratorReturnsNull_ReturnsEarlyWithoutEmailOrSave()
@@ -502,6 +509,64 @@ public class PipelineOrchestratorTests : IDisposable
     }
 
     /// <summary>
+    /// A failed extraction leaves its entities Added in the change tracker, and the context is
+    /// shared by every parent in the run, so the next SaveChanges anywhere retries them. Unless the
+    /// failure is rolled back, swallowing it is not containment: it moves the error onto this
+    /// parent's digest and then onto every later parent's.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_EventExtractionFailsMidWrite_LeavesNothingPendingForTheNextSave()
+    {
+        var message = await SeedUnprocessedMessageAsync(new Message
+        {
+            ExternalMessageId = "msg-extract-half-written",
+            FromName = "Principal",
+            MessageText = "Book Fair is on October 14.",
+            StudentName = "Test Child",
+            SentAt = new DateTime(2026, 3, 9, 8, 0, 0, DateTimeKind.Utc),
+            CreatedAt = DateTime.UtcNow
+        });
+
+        _mockDeduplicator.Setup(x => x.GetUnprocessedAsync(It.IsAny<Parent>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([message]);
+
+        _mockCategorizer.Setup(x => x.CategorizeAsync(It.IsAny<Message>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CategorizationResult { IsNewsItself = true, Summary = "Book Fair" });
+
+        // The extractor stages its rows and then fails on the save, exactly as a connection blip or
+        // an unencodable title does.
+        _mockEventExtractor.Setup(x => x.ExtractAsync(It.IsAny<NewsItem>(), It.IsAny<CancellationToken>()))
+            .Returns((NewsItem newsItem, CancellationToken _) =>
+            {
+                _db.TrackedEvents.Add(new TrackedEvent
+                {
+                    ParentId = newsItem.ParentId,
+                    SourceNewsItemId = newsItem.Id,
+                    School = "Test School",
+                    EventDate = new DateTime(2026, 10, 14, 0, 0, 0, DateTimeKind.Utc),
+                    Title = "Book Fair",
+                    Status = TrackedEventStatus.Active,
+                    CreatedAt = FixedUtcNow.UtcDateTime
+                });
+
+                throw new InvalidOperationException("insert failed");
+            });
+
+        SetupDigest("the-prompt", "# Weekly Summary\nContent here");
+
+        await _orchestrator.RunAsync(_testParent);
+
+        // The half-written row must not ride along on the next save, which is the one that stores
+        // the digest.
+        _db.TrackedEvents.Should().BeEmpty();
+
+        var summary = await _db.Summaries.SingleAsync();
+        summary.Content.Should().Be("# Weekly Summary\nContent here");
+        summary.EmailSentAt.Should().Be(FixedUtcNow.UtcDateTime);
+        _db.NewsItems.Should().ContainSingle("a failed extraction must not undo a stored news item");
+    }
+
+    /// <summary>
     /// The only write of IncludedInSummaryId in the system. Without it, every news item stays
     /// eligible forever and each week's digest re-reports every story ever fetched.
     /// </summary>
@@ -522,6 +587,96 @@ public class PipelineOrchestratorTests : IDisposable
         stored.Where(item => reported.Any(fed => fed.Id == item.Id))
             .Should().OnlyContain(item => item.IncludedInSummaryId == summary.Id);
         stored.Single(item => item.Id == untouched[0].Id).IncludedInSummaryId.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Being fed into the prompt is not being reported: the critic can find that a news item never
+    /// actually reached the sent digest's prose, and that item must stay eligible for next week
+    /// rather than being marked delivered for content the parent never received.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_CriticReportsAnOmittedItem_LeavesItUnreportedButMarksTheRest()
+    {
+        var fed = await SeedNewsItemsAsync("First story", "Second story");
+
+        SetupDigest("the-prompt", "# Weekly Summary\nOnly the first story made it in.", fed);
+
+        // fed[1] is SOURCE ITEM 2, the same order both the digest prompt and the critique prompt
+        // render the news items in.
+        _mockCritic.Setup(x => x.CritiqueAsync(It.IsAny<SummaryCritiqueRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([
+                new CritiqueFinding(
+                    CritiqueSeverity.Low,
+                    CritiqueFindingKinds.OmittedItem,
+                    string.Empty,
+                    "Source item 2 (the second story) has no trace anywhere in the draft.",
+                    string.Empty,
+                    SourceItemNumber: 2)
+            ]);
+
+        await _orchestrator.RunAsync(_testParent);
+
+        var summary = await _db.Summaries.SingleAsync();
+        summary.EmailSentAt.Should().Be(FixedUtcNow.UtcDateTime, "an omitted item is not a defect that blocks the send");
+        summary.RevisionCount.Should().Be(0, "omitted-item findings must never trigger a revision attempt");
+
+        var stored = await _db.NewsItems.ToListAsync();
+        stored.Single(item => item.Id == fed[0].Id).IncludedInSummaryId.Should().Be(
+            summary.Id, "the first story actually reached the sent digest");
+        stored.Single(item => item.Id == fed[1].Id).IncludedInSummaryId.Should().BeNull(
+            "the second story was fed into the prompt but never appeared in the sent digest, so it must roll into next week's");
+    }
+
+    /// <summary>
+    /// An omitted-item finding riding alongside a real defect must not leak into the text the
+    /// reviser is asked to fix: doing so would invite it to cram the dropped item back in, which
+    /// undoes the length and bullet caps the digest prompt asks the writer to respect.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_OmittedItemAlongsideARealDefect_NeverReachesTheRevisionPrompt()
+    {
+        const string Draft = "# Digest\n\nThe assembly is on Friday, March 13, 2026.\n";
+        const string Revised = "# Digest\n\nThe assembly is on Thursday, March 12, 2026.\n";
+
+        var fed = await SeedNewsItemsAsync("First story", "Second story");
+        SetupDigest("the-prompt", Draft, fed);
+
+        _mockCritic.Setup(x => x.CritiqueAsync(It.IsAny<SummaryCritiqueRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([
+                new CritiqueFinding(
+                    CritiqueSeverity.High,
+                    CritiqueFindingKinds.UnresolvedRelativeDate,
+                    "Friday, March 13, 2026",
+                    "The source said \"this Thursday\" and was sent on March 9, 2026.",
+                    "Thursday, March 12, 2026"),
+                new CritiqueFinding(
+                    CritiqueSeverity.Low,
+                    CritiqueFindingKinds.OmittedItem,
+                    string.Empty,
+                    "Source item 2 has no trace anywhere in the draft.",
+                    string.Empty,
+                    SourceItemNumber: 2)
+            ]);
+
+        SummaryRevisionRequest? revisionRequest = null;
+        _mockSummaryGenerator.Setup(x => x.ReviseAsync(It.IsAny<SummaryRevisionRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<SummaryRevisionRequest, CancellationToken>((request, _) => revisionRequest = request)
+            .ReturnsAsync(Revised);
+
+        await _orchestrator.RunAsync(_testParent);
+
+        revisionRequest.Should().NotBeNull();
+        revisionRequest!.Issues.Should().Contain(CritiqueFindingKinds.UnresolvedRelativeDate);
+        revisionRequest.Issues.Should().NotContain(CritiqueFindingKinds.OmittedItem,
+            "an omission is not something the reviser should try to fix by cramming the item back in");
+        revisionRequest.Issues.Should().NotContain("no trace anywhere in the draft");
+
+        var summary = await _db.Summaries.SingleAsync();
+        summary.RevisionCount.Should().Be(1);
+
+        var stored = await _db.NewsItems.ToListAsync();
+        stored.Single(item => item.Id == fed[1].Id).IncludedInSummaryId.Should().BeNull(
+            "the omission was still tracked outside the revision prompt");
     }
 
     /// <summary>
@@ -719,6 +874,272 @@ public class PipelineOrchestratorTests : IDisposable
         critiqueRequest.SourceItems.Select(item => item.Id).Should().Equal(fed[0].Id);
         critiqueRequest.ActiveEvents.Should().Contain("Book Fair");
         critiqueRequest.CoverageLedger.Should().Contain("Spring Concert");
+    }
+
+    /// <summary>
+    /// ReviseAsync reports every failure it can absorb by returning null: a truncated response, a
+    /// refusal, an empty completion, a provider outage. All of them have to end with the parent
+    /// receiving the draft, because the draft is a complete digest that cost a full model call.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_ReviserReturnsNoUsableRevision_StoresAndSendsTheDraft()
+    {
+        // 2026-03-01 is before the fixed current date, so the validator asks for a revision.
+        const string Draft = "# Digest\n\n## Important Upcoming Dates\n- **Sunday, March 1, 2026** - Book Fair\n";
+
+        SetupDigest("the-prompt", Draft);
+        _mockSummaryGenerator.Setup(x => x.ReviseAsync(It.IsAny<SummaryRevisionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
+
+        await _orchestrator.RunAsync(_testParent);
+
+        var summary = await _db.Summaries.SingleAsync();
+        summary.Content.Should().Be(Draft);
+        summary.RevisionCount.Should().Be(0);
+        summary.CritiqueLog.Should().Contain("\"revised\":false");
+        summary.EmailSentAt.Should().Be(FixedUtcNow.UtcDateTime);
+
+        _mockEmailSender.Verify(x => x.SendAsync(
+            "test@example.com", "Talking Points Summary", "<html>" + Draft + "</html>",
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>
+    /// A revision that is not a digest at all states no wrong dates, so it scores zero validation
+    /// findings and wins a straight count comparison against a draft that had one. Emailing it
+    /// would send the parent a sentence instead of the week's news and mark every source item
+    /// reported, so nothing in it is ever reported again.
+    /// </summary>
+    [Theory]
+    [InlineData("Here is the corrected digest:")]
+    [InlineData("I can't help with rewriting this content.")]
+    public async Task RunAsync_RevisionIsNotADigest_SendsTheOriginalDraft(string revision)
+    {
+        const string Draft =
+            "# Digest\n\n## Lincoln Elementary School-Wide News\n### Book Fair\nThe book fair runs all week "
+            + "and volunteers are still needed at the register on both days.\n\n"
+            + "## Important Upcoming Dates\n- **Sunday, March 1, 2026** - Book Fair\n";
+
+        SetupDigest("the-prompt", Draft);
+        _mockSummaryGenerator.Setup(x => x.ReviseAsync(It.IsAny<SummaryRevisionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(revision);
+
+        await _orchestrator.RunAsync(_testParent);
+
+        var summary = await _db.Summaries.SingleAsync();
+        summary.Content.Should().Be(Draft);
+        summary.RevisionCount.Should().Be(0);
+    }
+
+    /// <summary>
+    /// A rewrite that keeps the digest's shape but throws away the tracked dates the pipeline
+    /// rendered for it is caught by the validator itself, because the rendered block travels into
+    /// validation as the thing the output has to reproduce.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_RevisionDropsTheRenderedUpcomingDates_SendsTheOriginalDraft()
+    {
+        const string Draft =
+            "# Digest\n\n## Lincoln Elementary School-Wide News\n### Book Fair\nVolunteers are still needed.\n\n"
+            + "## Important Upcoming Dates\n"
+            + "- **Friday, March 20, 2026** - Book Fair\n"
+            + "- **Wedneday, March 25, 2026** - Picture Day\n";
+
+        // Same length and shape, correct weekday spelling, but the tracked dates are gone.
+        const string Stripped =
+            "# Digest\n\n## Lincoln Elementary School-Wide News\n### Book Fair\nVolunteers are still needed "
+            + "at the register, and the sale runs through the end of the month for every grade level.\n";
+
+        _mockSummaryGenerator.Setup(x => x.BuildPromptAsync(
+                It.IsAny<Parent>(), It.IsAny<CancellationToken>(), It.IsAny<int?>()))
+            .ReturnsAsync(new SummaryPromptResult(
+                "the-prompt",
+                [],
+                "### Test School (Test Child)\n"
+                + "- **Friday, March 20, 2026** - Book Fair\n"
+                + "- **Wednesday, March 25, 2026** - Picture Day\n"));
+        _mockSummaryGenerator.Setup(x => x.ExecutePromptAsync("the-prompt", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Draft);
+        _mockMarkdownConverter.Setup(x => x.ToHtml(It.IsAny<string>()))
+            .Returns<string>(value => "<html>" + value + "</html>");
+
+        _mockSummaryGenerator.Setup(x => x.ReviseAsync(It.IsAny<SummaryRevisionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Stripped);
+
+        await _orchestrator.RunAsync(_testParent);
+
+        var summary = await _db.Summaries.SingleAsync();
+        summary.Content.Should().Be(Draft);
+        summary.RevisionCount.Should().Be(0);
+    }
+
+    /// <summary>
+    /// A digest that never carried the rendered dates in the first place is reported by the
+    /// validator rather than passed through as clean, which is what makes the revision pass fire.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_DraftOmitsTheRenderedUpcomingDates_AsksForARevision()
+    {
+        const string Draft = "# Digest\n\n### Announcements\nThe book fair went well.\n";
+        const string Revised =
+            "# Digest\n\n### Announcements\nThe book fair went well.\n\n"
+            + "## Important Upcoming Dates\n- **Friday, March 20, 2026** - Book Fair\n";
+
+        _mockSummaryGenerator.Setup(x => x.BuildPromptAsync(
+                It.IsAny<Parent>(), It.IsAny<CancellationToken>(), It.IsAny<int?>()))
+            .ReturnsAsync(new SummaryPromptResult(
+                "the-prompt",
+                [],
+                "### Test School (Test Child)\n- **Friday, March 20, 2026** - Book Fair\n"));
+        _mockSummaryGenerator.Setup(x => x.ExecutePromptAsync("the-prompt", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Draft);
+        _mockMarkdownConverter.Setup(x => x.ToHtml(It.IsAny<string>()))
+            .Returns<string>(value => "<html>" + value + "</html>");
+
+        SummaryRevisionRequest? revisionRequest = null;
+        _mockSummaryGenerator.Setup(x => x.ReviseAsync(It.IsAny<SummaryRevisionRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<SummaryRevisionRequest, CancellationToken>((request, _) => revisionRequest = request)
+            .ReturnsAsync(Revised);
+
+        await _orchestrator.RunAsync(_testParent);
+
+        revisionRequest.Should().NotBeNull();
+        revisionRequest!.Issues.Should().Contain("MissingUpcomingDate");
+        revisionRequest.Issues.Should().Contain("Book Fair");
+
+        var summary = await _db.Summaries.SingleAsync();
+        summary.Content.Should().Be(Revised);
+        summary.RevisionCount.Should().Be(1);
+    }
+
+    /// <summary>
+    /// Coverage-driven eligibility keeps the same rows in front of the model until a digest built
+    /// from them is delivered, so a batch that stops at the token ceiling stops at it again on
+    /// every later run. Without shrinking, the parent never receives another digest and the backlog
+    /// only grows.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_GenerationTruncates_RetriesWithASmallerBatchAndSends()
+    {
+        var backlog = await SeedNewsItemsAsync(
+            Enumerable.Range(0, 40).Select(index => "Story " + index).ToArray());
+
+        _mockSummaryGenerator.Setup(x => x.BuildPromptAsync(
+                It.IsAny<Parent>(), It.IsAny<CancellationToken>(), null))
+            .ReturnsAsync(new SummaryPromptResult("full-prompt", backlog));
+        _mockSummaryGenerator.Setup(x => x.BuildPromptAsync(
+                It.IsAny<Parent>(), It.IsAny<CancellationToken>(), 20))
+            .ReturnsAsync(new SummaryPromptResult("half-prompt", backlog.Take(20).ToList()));
+
+        _mockSummaryGenerator.Setup(x => x.ExecutePromptAsync("full-prompt", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new AiResponseTruncatedException("stopped at max_tokens"));
+        _mockSummaryGenerator.Setup(x => x.ExecutePromptAsync("half-prompt", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("# Digest\n\nA shorter week.\n");
+
+        _mockMarkdownConverter.Setup(x => x.ToHtml(It.IsAny<string>()))
+            .Returns<string>(value => "<html>" + value + "</html>");
+
+        await _orchestrator.RunAsync(_testParent);
+
+        // One summary row, carrying the prompt that actually produced the digest.
+        var summary = await _db.Summaries.SingleAsync();
+        summary.Prompt.Should().Be("half-prompt");
+        summary.Content.Should().Be("# Digest\n\nA shorter week.\n");
+        summary.EmailSentAt.Should().Be(FixedUtcNow.UtcDateTime);
+
+        // The half that was sent is closed out; the rest still leads the next digest.
+        var stored = await _db.NewsItems.OrderBy(item => item.Id).ToListAsync();
+        stored.Take(20).Should().OnlyContain(item => item.IncludedInSummaryId == summary.Id);
+        stored.Skip(20).Should().OnlyContain(item => item.IncludedInSummaryId == null);
+    }
+
+    /// <summary>
+    /// Shrinking has a floor. Below it the prompt is not the problem, and a digest that truncates
+    /// on a handful of items has to surface as a failure rather than be whittled down to nothing.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_TruncationPersistsAtTheSmallestBatch_Throws()
+    {
+        var backlog = await SeedNewsItemsAsync("Story A", "Story B", "Story C");
+
+        _mockSummaryGenerator.Setup(x => x.BuildPromptAsync(
+                It.IsAny<Parent>(), It.IsAny<CancellationToken>(), It.IsAny<int?>()))
+            .ReturnsAsync(new SummaryPromptResult("the-prompt", backlog));
+        _mockSummaryGenerator.Setup(x => x.ExecutePromptAsync("the-prompt", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new AiResponseTruncatedException("stopped at max_tokens"));
+
+        var act = async () => await _orchestrator.RunAsync(_testParent);
+        await act.Should().ThrowAsync<AiResponseTruncatedException>();
+
+        var summary = await _db.Summaries.SingleAsync();
+        summary.Content.Should().BeNull("a truncated digest is never stored or sent");
+
+        (await _db.NewsItems.ToListAsync())
+            .Should().OnlyContain(item => item.IncludedInSummaryId == null);
+    }
+
+    /// <summary>
+    /// The validator is handed the local date, not the UTC one. For any timezone behind UTC an
+    /// event happening today is already yesterday in UTC after the day rolls over there, and would
+    /// be reported as a past date that must not be listed.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_EventDatedTodayInTheScheduleTimeZone_IsNotReportedAsPast()
+    {
+        // 02:00 UTC on March 10 is the evening of March 9 in Los Angeles.
+        var lateEvening = new FixedTimeProvider(new DateTimeOffset(2026, 3, 10, 2, 0, 0, TimeSpan.Zero));
+        const string Draft = "# Digest\n\n## Important Upcoming Dates\n- **Monday, March 9, 2026** - Book Fair\n";
+
+        SetupDigest("the-prompt", Draft);
+
+        var orchestrator = CreateOrchestrator("America/Los_Angeles", lateEvening);
+        await orchestrator.RunAsync(_testParent);
+
+        var summary = await _db.Summaries.SingleAsync();
+        summary.Content.Should().Be(Draft);
+        summary.CritiqueLog.Should().BeNull("today's event is upcoming, so there is nothing to correct");
+        summary.RevisionCount.Should().Be(0);
+    }
+
+    /// <summary>
+    /// The same instant and the same draft, read in UTC, where March 9 really has passed. This is
+    /// what stops the timezone conversion above from being indistinguishable from using UTC.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_SameDraftReadInUtc_ReportsTheDateAsPast()
+    {
+        var lateEvening = new FixedTimeProvider(new DateTimeOffset(2026, 3, 10, 2, 0, 0, TimeSpan.Zero));
+        const string Draft = "# Digest\n\n## Important Upcoming Dates\n- **Monday, March 9, 2026** - Book Fair\n";
+
+        SetupDigest("the-prompt", Draft);
+        _mockSummaryGenerator.Setup(x => x.ReviseAsync(It.IsAny<SummaryRevisionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
+
+        var orchestrator = CreateOrchestrator("UTC", lateEvening);
+        await orchestrator.RunAsync(_testParent);
+
+        var summary = await _db.Summaries.SingleAsync();
+        summary.CritiqueLog.Should().Contain("PastUpcomingDate");
+    }
+
+    [Fact]
+    public void IsUsableRevision_ARevisionThatIsStillADigest_IsAccepted()
+    {
+        const string Draft = "# Digest\n\n### Book Fair\nThe book fair is on Thursday, March 12, 2026.\n";
+        const string Revised = "# Digest\n\n### Book Fair\nThe book fair is on Friday, March 13, 2026.\n";
+
+        PipelineOrchestrator.IsUsableRevision(Draft, Revised, out var rejection).Should().BeTrue();
+        rejection.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void IsUsableRevision_ARevisionWithNoHeadingsAtAll_IsRejected()
+    {
+        var draft = "# Digest\n\n### Book Fair\n" + new string('x', 200) + "\n";
+        var prose = new string('y', 200);
+
+        PipelineOrchestrator.IsUsableRevision(draft, prose, out var rejection).Should().BeFalse();
+        rejection.Should().Contain("headings");
     }
 
     [Fact]

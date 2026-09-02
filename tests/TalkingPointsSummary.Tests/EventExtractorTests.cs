@@ -524,30 +524,70 @@ public class EventExtractorTests : IDisposable
         stored.SupersededByEventId.Should().BeNull();
     }
 
+    /// <summary>
+    /// School newsletters reprint a standing monthly calendar, which re-announces every event on it
+    /// including the ones that were called off. Reviving on a bare re-announcement would put a
+    /// cancelled event back in front of the parent every week until its date passed.
+    /// </summary>
     [Fact]
-    public async Task ExtractAsync_ReAnnouncedEventThatWasCancelled_ReinstatesTheExistingRow()
+    public async Task ExtractAsync_CancelledEventMerelyReAnnounced_StaysCancelled()
     {
-        var newsItem = await SeedNewsItemAsync("Update: the Spring Concert IS happening on March 20 after all.");
+        var newsItem = await SeedNewsItemAsync("May calendar: May 15 - Field Day. May 22 - Half Day.");
         var cancelled = await SeedTrackedEventAsync(
-            newsItem, "Spring Concert", new DateTime(2026, 3, 20, 0, 0, 0, DateTimeKind.Utc));
+            newsItem, "Field Day", new DateTime(2026, 5, 15, 0, 0, 0, DateTimeKind.Utc));
         cancelled.Status = TrackedEventStatus.Cancelled;
         await _db.SaveChangesAsync();
 
-        // Cancelled rows are never shown to the model, so a reinstatement can only ever arrive as a
-        // plain re-announcement. If that left the row cancelled, the event would be dropped from
-        // Important Upcoming Dates permanently with no way back.
+        // The model is shown cancelled rows but names none of them as reinstated, because a
+        // reprinted calendar is not a statement that the event is back on.
         RespondWith("""
             {
               "events": [
-                { "title": "Spring Concert", "event_date": "2026-03-20", "time_text": "6:30 PM" }
+                { "title": "Field Day", "event_date": "2026-05-15" }
               ],
-              "cancelled_event_ids": []
+              "cancelled_event_ids": [],
+              "reinstated_event_ids": []
             }
             """);
 
         var created = await CreateExtractor().ExtractAsync(newsItem);
 
-        created.Should().BeEmpty("nothing is inserted, the existing row comes back");
+        created.Should().BeEmpty("the date and title are already tracked, so no second row is inserted");
+
+        await using var verify = CreateContext();
+        var stored = await verify.TrackedEvents.SingleAsync();
+        stored.Id.Should().Be(cancelled.Id);
+        stored.Status.Should().Be(TrackedEventStatus.Cancelled);
+    }
+
+    /// <summary>
+    /// The deliberate channel out of a cancellation. The model is shown the cancelled rows and has
+    /// to name one, so a reinstatement is a decision about the text rather than an inference from
+    /// the event being mentioned at all.
+    /// </summary>
+    [Fact]
+    public async Task ExtractAsync_CancelledEventNamedAsReinstated_ComesBackActive()
+    {
+        var newsItem = await SeedNewsItemAsync("Good news: the Field Day we cancelled is back on for May 15.");
+        var cancelled = await SeedTrackedEventAsync(
+            newsItem, "Field Day", new DateTime(2026, 5, 15, 0, 0, 0, DateTimeKind.Utc));
+        cancelled.Status = TrackedEventStatus.Cancelled;
+        await _db.SaveChangesAsync();
+
+        // The cancelled row has to reach the prompt or the model has no id to name.
+        RespondWith($$"""
+            {
+              "events": [
+                { "title": "Field Day", "event_date": "2026-05-15" }
+              ],
+              "cancelled_event_ids": [],
+              "reinstated_event_ids": [{{cancelled.Id}}]
+            }
+            """);
+
+        await CreateExtractor().ExtractAsync(newsItem);
+
+        _capturedRequest!.Prompt.Should().Contain($"- id {cancelled.Id}: 2026-05-15 (no time given) Field Day");
 
         await using var verify = CreateContext();
         var stored = await verify.TrackedEvents.SingleAsync();
@@ -555,6 +595,146 @@ public class EventExtractorTests : IDisposable
         stored.Status.Should().Be(TrackedEventStatus.Active);
         stored.SupersededByEventId.Should().BeNull();
         stored.SourceNewsItemId.Should().Be(newsItem.Id, "the news item that brought it back is the current source");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_EventBothReinstatedAndCancelledByOneResponse_StaysCancelled()
+    {
+        var newsItem = await SeedNewsItemAsync("The Field Day question is still unsettled.");
+        var cancelled = await SeedTrackedEventAsync(
+            newsItem, "Field Day", new DateTime(2026, 5, 15, 0, 0, 0, DateTimeKind.Utc));
+        cancelled.Status = TrackedEventStatus.Cancelled;
+        await _db.SaveChangesAsync();
+
+        // A response that says both contradicts itself. The cancellation wins, the same way it
+        // does against a re-announcement.
+        RespondWith($$"""
+            {
+              "events": [],
+              "cancelled_event_ids": [{{cancelled.Id}}],
+              "reinstated_event_ids": [{{cancelled.Id}}]
+            }
+            """);
+
+        await CreateExtractor().ExtractAsync(newsItem);
+
+        await using var verify = CreateContext();
+        var stored = await verify.TrackedEvents.SingleAsync();
+        stored.Status.Should().Be(TrackedEventStatus.Cancelled);
+    }
+
+    /// <summary>
+    /// An event can be moved more than once. Only the last row in the chain is still active, so
+    /// demoting only the row the revived one points at leaves the chain's live tail active beside
+    /// it and renders the same event on two different dates.
+    /// </summary>
+    [Fact]
+    public async Task ExtractAsync_ReAnnouncedSupersededEventAtTheHeadOfAChain_DemotesTheLiveTail()
+    {
+        var newsItem = await SeedNewsItemAsync("Correction: the Spring Concert is back on March 20 after all.");
+
+        var original = await SeedTrackedEventAsync(
+            newsItem, "Spring Concert", new DateTime(2026, 3, 20, 0, 0, 0, DateTimeKind.Utc));
+        var middle = await SeedTrackedEventAsync(
+            newsItem, "Spring Concert", new DateTime(2026, 3, 27, 0, 0, 0, DateTimeKind.Utc));
+        var latest = await SeedTrackedEventAsync(
+            newsItem, "Spring Concert", new DateTime(2026, 4, 3, 0, 0, 0, DateTimeKind.Utc));
+
+        original.Status = TrackedEventStatus.Superseded;
+        original.SupersededByEventId = middle.Id;
+        middle.Status = TrackedEventStatus.Superseded;
+        middle.SupersededByEventId = latest.Id;
+        await _db.SaveChangesAsync();
+
+        RespondWith("""
+            {
+              "events": [
+                { "title": "Spring Concert", "event_date": "2026-03-20" }
+              ],
+              "cancelled_event_ids": [],
+              "reinstated_event_ids": []
+            }
+            """);
+
+        await CreateExtractor().ExtractAsync(newsItem);
+
+        await using var verify = CreateContext();
+        var stored = await verify.TrackedEvents.OrderBy(e => e.EventDate).ToListAsync();
+
+        stored.Where(e => e.Status == TrackedEventStatus.Active)
+            .Select(e => e.Id)
+            .Should().Equal([original.Id], "exactly one row for an event may be active at a time");
+
+        stored.Single(e => e.Id == latest.Id).SupersededByEventId.Should().Be(original.Id);
+        stored.Single(e => e.Id == middle.Id).Status.Should().Be(TrackedEventStatus.Superseded);
+    }
+
+    /// <summary>
+    /// A corrupted chain that points back at itself must not spin forever.
+    /// </summary>
+    [Fact]
+    public async Task ExtractAsync_ReAnnouncedSupersededEventInACyclicChain_StillCompletes()
+    {
+        var newsItem = await SeedNewsItemAsync("Correction: the Spring Concert is back on March 20 after all.");
+
+        var original = await SeedTrackedEventAsync(
+            newsItem, "Spring Concert", new DateTime(2026, 3, 20, 0, 0, 0, DateTimeKind.Utc));
+        var other = await SeedTrackedEventAsync(
+            newsItem, "Spring Concert", new DateTime(2026, 3, 27, 0, 0, 0, DateTimeKind.Utc));
+
+        original.Status = TrackedEventStatus.Superseded;
+        original.SupersededByEventId = other.Id;
+        other.Status = TrackedEventStatus.Superseded;
+        other.SupersededByEventId = original.Id;
+        await _db.SaveChangesAsync();
+
+        RespondWith("""
+            {
+              "events": [
+                { "title": "Spring Concert", "event_date": "2026-03-20" }
+              ],
+              "cancelled_event_ids": [],
+              "reinstated_event_ids": []
+            }
+            """);
+
+        await CreateExtractor().ExtractAsync(newsItem);
+
+        await using var verify = CreateContext();
+        var restored = await verify.TrackedEvents.SingleAsync(e => e.Id == original.Id);
+        restored.Status.Should().Be(TrackedEventStatus.Active);
+        restored.SupersededByEventId.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Titles are cut to the mapped column width. Cutting between the two chars of an emoji leaves
+    /// a lone surrogate, which is not valid UTF-8 and fails at the database driver.
+    /// </summary>
+    [Fact]
+    public async Task ExtractAsync_OverlongTitleEndingMidEmoji_StoresValidTextRatherThanALoneSurrogate()
+    {
+        var newsItem = await SeedNewsItemAsync("A very long announcement.");
+
+        // 199 plain chars then an emoji, so the 200-char cut lands between its two surrogates.
+        var title = new string('a', 199) + "\U0001F389" + "Party";
+        RespondWith($$"""
+            {
+              "events": [
+                { "title": "{{title}}", "event_date": "2026-03-20" }
+              ],
+              "cancelled_event_ids": []
+            }
+            """);
+
+        await CreateExtractor().ExtractAsync(newsItem);
+
+        await using var verify = CreateContext();
+        var stored = await verify.TrackedEvents.SingleAsync();
+
+        stored.Title.Should().Be(new string('a', 199));
+        stored.Title.Should().NotContainAny(
+            char.ConvertFromUtf32(0x1F389)[..1],
+            "a cut that splits a surrogate pair produces text no UTF-8 encoder will accept");
     }
 
     [Fact]
