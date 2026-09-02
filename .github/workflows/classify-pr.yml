@@ -68,3 +68,37 @@ jobs:
             PR: ${{ github.event.pull_request.title }}
             ${{ github.event.pull_request.html_url }}
         run: .github/scripts/notify-discord.ps1
+
+      # Independent of the classification above: that step flags a diff
+      # Claude judges to break this app's own contract, this one flags the
+      # dependency's own version jumping a major - either can fire without
+      # the other (see #124). Runs here rather than in automerge.yml because
+      # that workflow's Dependabot-authored `pull_request` runs only have
+      # access to Dependabot secrets, not DISCORD_WEBHOOK_URL (an Actions
+      # secret); pull_request_target runs like this one do.
+      - name: Fetch Dependabot metadata
+        id: dependabot-metadata
+        if: ${{ github.event.pull_request.head.repo.fork == false && github.actor == 'dependabot[bot]' }}
+        # continue-on-error: a transient failure here (API hiccup, quota) must
+        # not flip this job's overall conclusion to failure - this job feeds
+        # the label-gate required status check, so that would block merges
+        # unrelated to this step.
+        continue-on-error: true
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify Discord on Dependabot major version bump
+        if: >-
+          ${{ github.event.pull_request.head.repo.fork == false &&
+              github.actor == 'dependabot[bot]' &&
+              steps.dependabot-metadata.outputs.update-type == 'version-update:semver-major' }}
+        continue-on-error: true
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_MESSAGE: |
+            WARNING: **Dependabot major version bump detected** - manual review required before merging.
+
+            PR: ${{ github.event.pull_request.title }}
+            ${{ github.event.pull_request.html_url }}
+        run: .github/scripts/notify-discord.ps1
