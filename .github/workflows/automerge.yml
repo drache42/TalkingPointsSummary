@@ -31,6 +31,26 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # This checks Dependabot's own update-type, which is a different signal
+      # from classify-pr.yml's "Notify Discord on Dependabot major
+      # classification" step: that one flags a diff Claude judges to break
+      # this app's contract, this one flags the dependency's own version
+      # jumping a major - either can fire without the other.
+      - name: Notify Discord on Dependabot major version bump
+        if: ${{ steps.metadata.outputs.update-type == 'version-update:semver-major' }}
+        # Best-effort: a webhook failure here should not trip the job-level
+        # "Explain failure" step below, which is written for the auto-merge
+        # path and would report a misleading cause.
+        continue-on-error: true
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_MESSAGE: |
+            [!] **Dependabot major version bump detected** - manual review required before merging.
+
+            PR: ${{ github.event.pull_request.title }}
+            ${{ github.event.pull_request.html_url }}
+        run: .github/scripts/notify-discord.ps1
+
       # Enable auto-merge as the froefam-automerge GitHub App, not GITHUB_TOKEN:
       # a merge pushed by GITHUB_TOKEN does not trigger main.yml (GitHub's
       # workflow-recursion guard), so auto-merged PRs never get a release. See #122.
