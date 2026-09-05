@@ -32,6 +32,302 @@ public class ConfigurationOptionsValidationTests
             .WithMessage("*Ai:Anthropic:ApiKey*");
     }
 
+    [Theory]
+    // Claude 5 and later reject {"type":"enabled"} outright, so budget mode is unusable there.
+    [InlineData("claude-sonnet-5", "budget")]
+    [InlineData("claude-opus-5", "budget")]
+    // Claude 4.5 and earlier support neither adaptive thinking nor the effort parameter.
+    [InlineData("claude-sonnet-4-5-20250929", "adaptive")]
+    [InlineData("claude-haiku-4-5-20251001", "adaptive")]
+    public void EnsureValidatedOptions_ThinkingModeTheModelFamilyRejects_Throws(string modelId, string thinking)
+    {
+        // Without this cross-check the pairing passes check-config and then returns HTTP 400 on
+        // every single call, which reads as an outage rather than a configuration mistake.
+        using var provider = BuildServiceProvider(BaseConfig(new Dictionary<string, string?>
+        {
+            ["Ai:Profiles:Summarization:ModelId"] = modelId,
+            ["Ai:Profiles:Summarization:Thinking"] = thinking,
+            ["Ai:Profiles:Summarization:ThinkingBudgetTokens"] = "8000",
+            ["Ai:Profiles:Summarization:MaxTokens"] = "32000",
+            ["Ai:Profiles:Summarization:Effort"] = thinking == "adaptive" ? "high" : null,
+        }));
+
+        var act = () => WorkerConfiguration.EnsureValidatedOptions(provider);
+
+        act.Should().Throw<OptionsValidationException>()
+            .WithMessage("*Ai:Profiles:Summarization:Thinking*");
+    }
+
+    [Theory]
+    [InlineData("claude-sonnet-5", "adaptive", "high", null)]
+    [InlineData("claude-haiku-4-5-20251001", "budget", null, "8000")]
+    [InlineData("claude-sonnet-4-5-20250929", "none", null, null)]
+    [InlineData("claude-sonnet-5", "none", null, null)]
+    // A gateway alias carries no readable family or version, so no constraint can be asserted
+    // and whatever the profile configures has to pass through unchanged.
+    [InlineData("lab-llm", "budget", null, "8000")]
+    [InlineData("lab-llm", "adaptive", "high", null)]
+    public void EnsureValidatedOptions_ThinkingModeTheModelFamilyAccepts_DoesNotThrow(
+        string modelId, string thinking, string? effort, string? budgetTokens)
+    {
+        using var provider = BuildServiceProvider(BaseConfig(new Dictionary<string, string?>
+        {
+            ["Ai:Profiles:Summarization:ModelId"] = modelId,
+            ["Ai:Profiles:Summarization:Thinking"] = thinking,
+            ["Ai:Profiles:Summarization:ThinkingBudgetTokens"] = budgetTokens,
+            ["Ai:Profiles:Summarization:MaxTokens"] = "32000",
+            ["Ai:Profiles:Summarization:Effort"] = effort,
+        }));
+
+        var act = () => WorkerConfiguration.EnsureValidatedOptions(provider);
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void EnsureValidatedOptions_UnknownThinkingMode_Throws()
+    {
+        using var provider = BuildServiceProvider(BaseConfig(new Dictionary<string, string?>
+        {
+            ["Ai:Profiles:Summarization:Thinking"] = "extended",
+        }));
+
+        var act = () => WorkerConfiguration.EnsureValidatedOptions(provider);
+
+        act.Should().Throw<OptionsValidationException>()
+            .WithMessage("*Ai:Profiles:Summarization:Thinking*");
+    }
+
+    [Fact]
+    public void EnsureValidatedOptions_UnknownEffortLevel_Throws()
+    {
+        using var provider = BuildServiceProvider(BaseConfig(new Dictionary<string, string?>
+        {
+            ["Ai:Profiles:Summarization:Effort"] = "extreme",
+        }));
+
+        var act = () => WorkerConfiguration.EnsureValidatedOptions(provider);
+
+        act.Should().Throw<OptionsValidationException>()
+            .WithMessage("*Ai:Profiles:Summarization:Effort*");
+    }
+
+    [Theory]
+    // Budget-mode Anthropic calls never send output_config.effort, so a configured value is
+    // silently dropped rather than rejected -- reject it at startup instead.
+    [InlineData("budget")]
+    [InlineData("none")]
+    public void EnsureValidatedOptions_EffortSetWithoutAdaptiveThinking_Throws(string thinking)
+    {
+        using var provider = BuildServiceProvider(BaseConfig(new Dictionary<string, string?>
+        {
+            ["Ai:Profiles:Categorization:Thinking"] = thinking,
+            ["Ai:Profiles:Categorization:Effort"] = "high",
+            ["Ai:Profiles:Categorization:ThinkingBudgetTokens"] = "2048",
+            ["Ai:Profiles:Categorization:MaxTokens"] = "4096",
+        }));
+
+        var act = () => WorkerConfiguration.EnsureValidatedOptions(provider);
+
+        act.Should().Throw<OptionsValidationException>()
+            .WithMessage("*Ai:Profiles:Categorization:Effort*")
+            .WithMessage("*adaptive*");
+    }
+
+    [Fact]
+    public void EnsureValidatedOptions_EffortWithAdaptiveThinking_Passes()
+    {
+        using var provider = BuildServiceProvider(BaseConfig(new Dictionary<string, string?>
+        {
+            // Overriding the model, not just Thinking/Effort: the default Categorization model is
+            // a Budget-shape Haiku, which would fail the separate model/thinking compatibility
+            // check before this rule ever gets exercised.
+            ["Ai:Profiles:Categorization:ModelId"] = "claude-sonnet-5",
+            ["Ai:Profiles:Categorization:Thinking"] = "adaptive",
+            ["Ai:Profiles:Categorization:Effort"] = "high",
+        }));
+
+        var act = () => WorkerConfiguration.EnsureValidatedOptions(provider);
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void EnsureValidatedOptions_BudgetThinkingBelowMinimumBudget_Throws()
+    {
+        using var provider = BuildServiceProvider(BaseConfig(new Dictionary<string, string?>
+        {
+            ["Ai:Profiles:Categorization:Thinking"] = "budget",
+            ["Ai:Profiles:Categorization:ThinkingBudgetTokens"] = "512",
+            ["Ai:Profiles:Categorization:MaxTokens"] = "4096",
+        }));
+
+        var act = () => WorkerConfiguration.EnsureValidatedOptions(provider);
+
+        act.Should().Throw<OptionsValidationException>()
+            .WithMessage("*Ai:Profiles:Categorization:ThinkingBudgetTokens*");
+    }
+
+    [Fact]
+    public void EnsureValidatedOptions_BudgetThinkingBudgetNotLessThanMaxTokens_Throws()
+    {
+        using var provider = BuildServiceProvider(BaseConfig(new Dictionary<string, string?>
+        {
+            ["Ai:Profiles:Categorization:Thinking"] = "budget",
+            ["Ai:Profiles:Categorization:ThinkingBudgetTokens"] = "4096",
+            ["Ai:Profiles:Categorization:MaxTokens"] = "4096",
+        }));
+
+        var act = () => WorkerConfiguration.EnsureValidatedOptions(provider);
+
+        act.Should().Throw<OptionsValidationException>()
+            .WithMessage("*Ai:Profiles:Categorization:ThinkingBudgetTokens*");
+    }
+
+    [Fact]
+    public void EnsureValidatedOptions_BudgetThinkingLeavesNoHeadroomForOutput_Throws()
+    {
+        // Thinking tokens count against MaxTokens, so a budget merely smaller than MaxTokens is
+        // not enough: this leaves only 1 token for the actual visible response.
+        using var provider = BuildServiceProvider(BaseConfig(new Dictionary<string, string?>
+        {
+            ["Ai:Profiles:Categorization:Thinking"] = "budget",
+            ["Ai:Profiles:Categorization:ThinkingBudgetTokens"] = "1024",
+            ["Ai:Profiles:Categorization:MaxTokens"] = "1025",
+        }));
+
+        var act = () => WorkerConfiguration.EnsureValidatedOptions(provider);
+
+        act.Should().Throw<OptionsValidationException>()
+            .WithMessage("*Ai:Profiles:Categorization:ThinkingBudgetTokens*");
+    }
+
+    [Theory]
+    // ThinkingBudgetTokens only means something in budget mode; set under any other mode, the
+    // provider translator never reads it, so it is rejected rather than silently ignored -- the
+    // same rule as Effort/adaptive, applied to the other mode-specific field.
+    [InlineData("none")]
+    [InlineData("adaptive")]
+    public void EnsureValidatedOptions_ThinkingBudgetTokensSetWithoutBudgetThinking_Throws(string thinking)
+    {
+        using var provider = BuildServiceProvider(BaseConfig(new Dictionary<string, string?>
+        {
+            ["Ai:Profiles:Categorization:Thinking"] = thinking,
+            ["Ai:Profiles:Categorization:ThinkingBudgetTokens"] = "1",
+        }));
+
+        var act = () => WorkerConfiguration.EnsureValidatedOptions(provider);
+
+        act.Should().Throw<OptionsValidationException>()
+            .WithMessage("*Ai:Profiles:Categorization:ThinkingBudgetTokens*")
+            .WithMessage("*budget*");
+    }
+
+    [Fact]
+    public void EnsureValidatedOptions_ThinkingBudgetTokensUnsetRegardlessOfMode_Passes()
+    {
+        // Zero is this schema's "not configured" sentinel for ThinkingBudgetTokens, so it must
+        // never trip the mode-applicability check regardless of which mode is active.
+        using var provider = BuildServiceProvider(BaseConfig(new Dictionary<string, string?>
+        {
+            ["Ai:Profiles:Categorization:Thinking"] = "none",
+            ["Ai:Profiles:Categorization:ThinkingBudgetTokens"] = "0",
+        }));
+
+        var act = () => WorkerConfiguration.EnsureValidatedOptions(provider);
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void EnsureValidatedOptions_MaxTokensBelowOne_Throws()
+    {
+        using var provider = BuildServiceProvider(BaseConfig(new Dictionary<string, string?>
+        {
+            ["Ai:Profiles:Summarization:MaxTokens"] = "0",
+        }));
+
+        var act = () => WorkerConfiguration.EnsureValidatedOptions(provider);
+
+        act.Should().Throw<OptionsValidationException>()
+            .WithMessage("*Ai:Profiles:Summarization:MaxTokens*");
+    }
+
+    [Fact]
+    public void EnsureValidatedOptions_ValidReasoningSettings_BindsProfiles()
+    {
+        using var provider = BuildServiceProvider(BaseConfig(new Dictionary<string, string?>
+        {
+            ["Ai:Profiles:Categorization:Thinking"] = "budget",
+            ["Ai:Profiles:Categorization:ThinkingBudgetTokens"] = "2048",
+            ["Ai:Profiles:Categorization:MaxTokens"] = "8192",
+            ["Ai:Profiles:Summarization:Effort"] = "xhigh",
+        }));
+
+        var act = () => WorkerConfiguration.EnsureValidatedOptions(provider);
+        act.Should().NotThrow();
+
+        var profiles = provider.GetRequiredService<IOptions<AiOptions>>().Value.Profiles;
+
+        profiles.Categorization.Thinking.Should().Be("budget");
+        profiles.Categorization.ThinkingBudgetTokens.Should().Be(2048);
+        profiles.Categorization.MaxTokens.Should().Be(8192);
+        profiles.Categorization.Effort.Should().BeNull();
+        profiles.Summarization.Effort.Should().Be("xhigh");
+    }
+
+    [Fact]
+    public void EnsureValidatedOptions_ProfileDefaults_AreValidAndUseAdaptiveThinkingForClaude5()
+    {
+        using var provider = BuildServiceProvider(BaseConfig([]));
+
+        var act = () => WorkerConfiguration.EnsureValidatedOptions(provider);
+        act.Should().NotThrow();
+
+        var profiles = provider.GetRequiredService<IOptions<AiOptions>>().Value.Profiles;
+
+        profiles.Summarization.ModelId.Should().Be("claude-sonnet-5");
+        profiles.Summarization.MaxTokens.Should().Be(32000);
+        profiles.Summarization.Thinking.Should().Be("adaptive");
+        profiles.Summarization.Effort.Should().Be("high");
+
+        // Haiku 4.5 rejects adaptive thinking, so the Haiku profiles must not request it.
+        profiles.Categorization.Thinking.Should().Be("none");
+        profiles.Categorization.Effort.Should().BeNull();
+        profiles.Validation.ModelId.Should().Be("claude-haiku-4-5-20251001");
+        profiles.Validation.Thinking.Should().Be("none");
+        profiles.Validation.Effort.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Returns a configuration set that validates cleanly, with <paramref name="overrides"/>
+    /// applied on top so a single rule can be exercised in isolation.
+    /// </summary>
+    private static Dictionary<string, string?> BaseConfig(Dictionary<string, string?> overrides)
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:TalkingPoints"] = "Host=localhost;Database=talkingpoints;Username=postgres;Password=postgres",
+            ["Ai:Provider"] = "Anthropic",
+            ["Ai:Anthropic:ApiKey"] = "test-key",
+            ["Browserless:BaseUrl"] = "http://localhost:3000",
+            ["NewsletterScrapingSecurity:Enabled"] = "true",
+            ["TalkingPointsApi:MaxPagesPerRun"] = "3",
+            ["Smtp:Host"] = "localhost",
+            ["Smtp:Port"] = "1025",
+            ["Smtp:FromEmail"] = "dev@example.com",
+            ["PipelineSchedule:DayOfWeek"] = "1",
+            ["PipelineSchedule:Hour"] = "8",
+        };
+
+        foreach (var (key, value) in overrides)
+        {
+            values[key] = value;
+        }
+
+        return values;
+    }
+
     [Fact]
     public void EnsureValidatedOptions_InvalidBrowserlessUrl_Throws()
     {

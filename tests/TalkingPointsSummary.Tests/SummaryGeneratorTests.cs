@@ -29,7 +29,13 @@ public class SummaryGeneratorTests : IDisposable
             Provider = "Anthropic",
             Profiles = new AiProfilesOptions
             {
-                Summarization = new AiProfileOptions { ModelId = "claude-sonnet-4-5-20250929", MaxTokens = 8192 }
+                Summarization = new AiProfileOptions
+                {
+                    ModelId = "claude-sonnet-4-5-20250929",
+                    MaxTokens = 8192,
+                    Thinking = AiThinkingModes.Adaptive,
+                    Effort = AiEffortLevels.High
+                }
             }
         };
     }
@@ -86,23 +92,64 @@ public class SummaryGeneratorTests : IDisposable
     }
 
     [Fact]
-    public async Task ExecutePromptAsync_CallsAiClientWithSummarizationProfile()
+    public async Task ExecutePromptAsync_SendsTheWholeSummarizationProfileIncludingItsReasoningSettings()
     {
-        _mockAiClient
-            .Setup(c => c.CompleteAsync(It.IsAny<AiCompletionRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AiCompletionResult("# Summary\nContent"));
+        var captured = CaptureRequest("# Summary\nContent");
 
         var generator = CreateGenerator();
         var result = await generator.ExecutePromptAsync("the prompt");
 
-        _mockAiClient.Verify(c => c.CompleteAsync(
-            It.Is<AiCompletionRequest>(r =>
-                r.Prompt == "the prompt" &&
-                r.ModelId == "claude-sonnet-4-5-20250929" &&
-                r.MaxTokens == 8192),
-            It.IsAny<CancellationToken>()), Times.Once);
+        captured.Value.Should().NotBeNull();
+        captured.Value!.Prompt.Should().Be("the prompt");
+        captured.Value.ModelId.Should().Be("claude-sonnet-4-5-20250929");
+        captured.Value.MaxTokens.Should().Be(8192);
+
+        // Reasoning settings that never leave the generator mean every digest is produced with
+        // thinking off, silently, while still paying for the token ceiling raised to hold thinking
+        // tokens. Nothing else in the pipeline would notice.
+        captured.Value.Thinking.Should().Be(AiThinkingModes.Adaptive);
+        captured.Value.Effort.Should().Be(AiEffortLevels.High);
 
         result.Should().Be("# Summary\nContent");
+    }
+
+    [Fact]
+    public async Task ExecutePromptAsync_BudgetThinkingProfile_SendsTheConfiguredBudget()
+    {
+        _aiOptions.Profiles.Summarization = new AiProfileOptions
+        {
+            ModelId = "claude-haiku-4-5-20251001",
+            MaxTokens = 8192,
+            Thinking = AiThinkingModes.Budget,
+            ThinkingBudgetTokens = 4096
+        };
+
+        var captured = CaptureRequest("# Summary\nContent");
+
+        await CreateGenerator().ExecutePromptAsync("the prompt");
+
+        captured.Value!.Thinking.Should().Be(AiThinkingModes.Budget);
+        captured.Value.ThinkingBudgetTokens.Should().Be(4096);
+        captured.Value.Effort.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Records the request the generator actually builds, so assertions are made against the
+    /// request itself rather than against the mock having been called.
+    /// </summary>
+    private CapturedRequest CaptureRequest(string responseText)
+    {
+        var captured = new CapturedRequest();
+        _mockAiClient
+            .Setup(c => c.CompleteAsync(It.IsAny<AiCompletionRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<AiCompletionRequest, CancellationToken>((request, _) => captured.Value = request)
+            .ReturnsAsync(new AiCompletionResult(responseText));
+        return captured;
+    }
+
+    private sealed class CapturedRequest
+    {
+        public AiCompletionRequest? Value { get; set; }
     }
 
     [Fact]

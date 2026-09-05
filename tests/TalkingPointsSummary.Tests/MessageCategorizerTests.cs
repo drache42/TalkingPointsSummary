@@ -22,17 +22,49 @@ public class MessageCategorizerTests
         SentAt = new DateTime(2026, 3, 7, 10, 0, 0, DateTimeKind.Utc)
     };
 
-    private static MessageCategorizer CreateCategorizer(Mock<IAiClient> mockAiClient)
+    private static MessageCategorizer CreateCategorizer(
+        Mock<IAiClient> mockAiClient,
+        AiProfileOptions? categorization = null)
     {
         var options = Options.Create(new AiOptions
         {
             Provider = "Anthropic",
             Profiles = new AiProfilesOptions
             {
-                Categorization = new AiProfileOptions { ModelId = "claude-haiku-4-5-20251001", MaxTokens = 1024 }
+                Categorization = categorization
+                    ?? new AiProfileOptions { ModelId = "claude-haiku-4-5-20251001", MaxTokens = 1024 }
             }
         });
         return new MessageCategorizer(mockAiClient.Object, options, NullLogger<MessageCategorizer>.Instance);
+    }
+
+    [Fact]
+    public async Task CategorizeAsync_SendsTheCategorizationProfileIncludingItsReasoningSettings()
+    {
+        var mock = new Mock<IAiClient>();
+        AiCompletionRequest? captured = null;
+        mock.Setup(c => c.CompleteAsync(It.IsAny<AiCompletionRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<AiCompletionRequest, CancellationToken>((request, _) => captured = request)
+            .ReturnsAsync(new AiCompletionResult("""{"message_id":"msg-001","is_news_itself":true,"summary":"s"}"""));
+
+        // Haiku takes a fixed thinking budget and rejects the effort parameter. A profile whose
+        // reasoning settings never reach the request runs with thinking off and nothing reports it.
+        var categorizer = CreateCategorizer(mock, new AiProfileOptions
+        {
+            ModelId = "claude-haiku-4-5-20251001",
+            MaxTokens = 4096,
+            Thinking = AiThinkingModes.Budget,
+            ThinkingBudgetTokens = 2048
+        });
+
+        await categorizer.CategorizeAsync(_testMessage);
+
+        captured.Should().NotBeNull();
+        captured!.ModelId.Should().Be("claude-haiku-4-5-20251001");
+        captured.MaxTokens.Should().Be(4096);
+        captured.Thinking.Should().Be(AiThinkingModes.Budget);
+        captured.ThinkingBudgetTokens.Should().Be(2048);
+        captured.Effort.Should().BeNull();
     }
 
     private static Mock<IAiClient> CreateMockAiClient(string responseText)

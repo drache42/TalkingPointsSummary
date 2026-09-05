@@ -78,8 +78,17 @@ public partial class MessageCategorizer : IMessageCategorizer
         var prompt = PromptBuilder.Build(message);
         var profile = _options.Profiles.Categorization;
 
+        // The reasoning settings travel with the profile, so a categorization profile configured
+        // for extended thinking actually gets it instead of silently running with thinking off.
         var aiResult = await _aiClient.CompleteAsync(
-            new AiCompletionRequest(prompt, profile.ModelId, profile.MaxTokens), ct);
+            new AiCompletionRequest(
+                prompt,
+                profile.ModelId,
+                profile.MaxTokens,
+                profile.Thinking,
+                profile.ThinkingBudgetTokens,
+                profile.Effort),
+            ct);
 
         var text = StripCodeFences().Replace(aiResult.Text, "").Trim();
 

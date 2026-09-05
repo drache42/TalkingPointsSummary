@@ -84,11 +84,22 @@ public class SummaryGenerator : ISummaryGenerator
     {
         var profile = _options.Profiles.Summarization;
 
-        _logger.LogInformation("Executing summary prompt via AI (model: {Model}, maxTokens: {MaxTokens})",
-            profile.ModelId, profile.MaxTokens);
+        _logger.LogInformation(
+            "Executing summary prompt via AI (model: {Model}, maxTokens: {MaxTokens}, thinking: {Thinking}, effort: {Effort})",
+            profile.ModelId, profile.MaxTokens, profile.Thinking, profile.Effort ?? "none");
 
+        // The reasoning settings travel with the profile. Dropping them here would silently
+        // generate every digest with thinking off while still paying for the raised MaxTokens
+        // ceiling that only exists because thinking tokens count against it.
         var result = await _aiClient.CompleteAsync(
-            new AiCompletionRequest(prompt, profile.ModelId, profile.MaxTokens), ct);
+            new AiCompletionRequest(
+                prompt,
+                profile.ModelId,
+                profile.MaxTokens,
+                profile.Thinking,
+                profile.ThinkingBudgetTokens,
+                profile.Effort),
+            ct);
 
         var markdown = result.Text;
 
