@@ -1,11 +1,14 @@
+using System.Globalization;
 using TalkingPointsSummary.Configuration;
 
 namespace TalkingPointsSummary.Services;
 
 /// <summary>
-/// Extended-thinking request shape a Claude model family accepts. The two shapes are mutually
-/// exclusive: sending the wrong one is rejected by the provider with HTTP 400 on every call,
-/// not degraded, so the pairing has to be decided before a request is built.
+/// Extended-thinking request shape a Claude model accepts. Adaptive and Budget are mutually
+/// exclusive: sending the wrong one is rejected by the provider with HTTP 400 on every call, not
+/// degraded, so the pairing has to be decided before a request is built. Either means the
+/// provider currently accepts both, which happens only during Opus/Sonnet 4.6's transitional
+/// window where the older shape is deprecated but not yet removed.
 /// </summary>
 internal enum AnthropicReasoningShape
 {
@@ -16,42 +19,73 @@ internal enum AnthropicReasoningShape
     Unknown,
 
     /// <summary>
-    /// Claude 5 and later: thinking is requested as <c>{"type":"adaptive"}</c> and the reasoning
-    /// level travels in <c>output_config.effort</c>. These models reject <c>{"type":"enabled"}</c>.
+    /// Thinking is requested as <c>{"type":"adaptive"}</c> and the reasoning level travels in
+    /// <c>output_config.effort</c>. These models reject <c>{"type":"enabled"}</c> with HTTP 400.
     /// </summary>
     Adaptive,
 
     /// <summary>
-    /// Claude 4.5 and earlier: thinking is requested as
-    /// <c>{"type":"enabled","budget_tokens":N}</c>. These models support neither adaptive
-    /// thinking nor the effort parameter.
+    /// Thinking is requested as <c>{"type":"enabled","budget_tokens":N}</c>. These models do not
+    /// accept adaptive thinking or the effort parameter.
     /// </summary>
-    Budget
+    Budget,
+
+    /// <summary>
+    /// Both shapes are currently accepted. Opus and Sonnet 4.6 only: budget_tokens still works
+    /// there as a deprecated transitional escape hatch alongside the recommended adaptive shape.
+    /// </summary>
+    Either
 }
 
 /// <summary>
 /// Anthropic's <see cref="IAiReasoningCompatibility"/>. Maps a Claude model identifier to the
-/// extended-thinking shape its family accepts, so a profile that pairs a model with the wrong
-/// reasoning mode is caught at startup instead of failing every request at runtime. Every rule in
-/// this class is specific to how Claude names and versions its models; a different provider's
-/// implementation of the interface would carry none of it.
+/// extended-thinking shape its family and version accept, so a profile that pairs a model with an
+/// impossible reasoning mode is caught at startup instead of failing every request at runtime.
+/// Every rule in this class is specific to how Claude names and versions its models; a different
+/// provider's implementation of the interface would carry none of it.
 /// </summary>
+/// <remarks>
+/// The adaptive rollout is not a clean "major version N and later" cutoff: within the Opus and
+/// Sonnet families, 4.6 accepts either shape, 4.7 and later accept only adaptive, and every
+/// version below 4.6 accepts only budget. Haiku has no adaptive-capable release yet, so a Haiku 4.x
+/// id stays budget-only even though Opus/Sonnet 4.6+ do not. This is why the shape is computed
+/// from family, major, and minor version together rather than from major version alone.
+/// </remarks>
 internal sealed class AnthropicModelReasoning : IAiReasoningCompatibility
 {
     /// <summary>
-    /// First Claude major version that uses adaptive thinking and reasoning effort.
+    /// First major version, across every family, that accepts only adaptive thinking.
     /// </summary>
-    private const int FirstAdaptiveMajorVersion = 5;
+    private const int FirstAdaptiveOnlyMajorVersion = 5;
+
+    /// <summary>
+    /// The Opus/Sonnet major version whose shape depends on the minor version rather than being
+    /// fixed for the whole major version, unlike every other major version.
+    /// </summary>
+    private const int MixedShapeMajorVersion = 4;
+
+    /// <summary>
+    /// Opus/Sonnet minor version that still accepts budget_tokens as a deprecated transitional
+    /// escape hatch alongside the recommended adaptive shape.
+    /// </summary>
+    private const int TransitionalMinorVersion = 6;
+
+    /// <summary>
+    /// First Opus/Sonnet minor version, within <see cref="MixedShapeMajorVersion"/>, where
+    /// budget_tokens is removed and only adaptive thinking is accepted.
+    /// </summary>
+    private const int FirstAdaptiveOnlyMinorVersion = 7;
 
     /// <summary>
     /// Longest numeric token still read as a version number. Anything longer is a release date
-    /// such as "20251001", which must never be mistaken for a major version.
+    /// such as "20251001", which must never be mistaken for a version number.
     /// </summary>
     private const int MaxVersionTokenLength = 2;
 
     private const string ClaudeMarker = "claude";
+    private const string HaikuFamily = "haiku";
 
-    private static readonly string[] FamilyNames = ["opus", "sonnet", "haiku"];
+    private static readonly string[] FamilyNames = ["opus", "sonnet", HaikuFamily];
 
     /// <summary>
     /// Returns the extended-thinking shape the given model accepts.
@@ -73,34 +107,57 @@ internal sealed class AnthropicModelReasoning : IAiReasoningCompatibility
         if (markerIndex < 0)
             return AnthropicReasoningShape.Unknown;
 
-        // "claude-3-5-sonnet-20241022" puts the version before the family and
-        // "claude-sonnet-5" puts it after, so both parts are located independently.
+        // "claude-3-5-sonnet-20241022" puts major.minor before the family and
+        // "claude-opus-4-7" puts them after, so family, major, and minor are each located
+        // independently of where the others appear in the token stream.
         var tokens = modelId[(markerIndex + ClaudeMarker.Length)..]
             .Split(['-', '.', '_', ':'], StringSplitOptions.RemoveEmptyEntries);
 
-        var hasFamily = false;
+        string? family = null;
         var majorVersion = 0;
+        var minorVersion = 0;
 
         foreach (var token in tokens)
         {
-            if (!hasFamily && FamilyNames.Contains(token, StringComparer.OrdinalIgnoreCase))
+            if (family is null)
             {
-                hasFamily = true;
-                continue;
+                var matchedFamily = Array.Find(FamilyNames,
+                    f => string.Equals(f, token, StringComparison.OrdinalIgnoreCase));
+                if (matchedFamily is not null)
+                {
+                    family = matchedFamily;
+                    continue;
+                }
             }
 
-            if (majorVersion == 0 && IsVersionToken(token))
-            {
-                majorVersion = int.Parse(token, System.Globalization.CultureInfo.InvariantCulture);
-            }
+            if (!IsVersionToken(token))
+                continue;
+
+            if (majorVersion == 0)
+                majorVersion = int.Parse(token, CultureInfo.InvariantCulture);
+            else if (minorVersion == 0)
+                minorVersion = int.Parse(token, CultureInfo.InvariantCulture);
         }
 
-        if (!hasFamily || majorVersion == 0)
+        if (family is null || majorVersion == 0)
             return AnthropicReasoningShape.Unknown;
 
-        return majorVersion >= FirstAdaptiveMajorVersion
-            ? AnthropicReasoningShape.Adaptive
-            : AnthropicReasoningShape.Budget;
+        if (majorVersion >= FirstAdaptiveOnlyMajorVersion)
+            return AnthropicReasoningShape.Adaptive;
+
+        // Haiku has no adaptive-capable release yet, so it never enters the mixed-shape branch
+        // that applies to Opus and Sonnet's 4.x generation.
+        var isHaiku = string.Equals(family, HaikuFamily, StringComparison.OrdinalIgnoreCase);
+        if (!isHaiku && majorVersion == MixedShapeMajorVersion)
+        {
+            if (minorVersion >= FirstAdaptiveOnlyMinorVersion)
+                return AnthropicReasoningShape.Adaptive;
+
+            if (minorVersion == TransitionalMinorVersion)
+                return AnthropicReasoningShape.Either;
+        }
+
+        return AnthropicReasoningShape.Budget;
     }
 
     /// <inheritdoc/>
@@ -111,10 +168,10 @@ internal sealed class AnthropicModelReasoning : IAiReasoningCompatibility
             return true;
 
         if (string.Equals(thinking, AiThinkingModes.Adaptive, StringComparison.OrdinalIgnoreCase))
-            return shape == AnthropicReasoningShape.Adaptive;
+            return shape is AnthropicReasoningShape.Adaptive or AnthropicReasoningShape.Either;
 
         if (string.Equals(thinking, AiThinkingModes.Budget, StringComparison.OrdinalIgnoreCase))
-            return shape == AnthropicReasoningShape.Budget;
+            return shape is AnthropicReasoningShape.Budget or AnthropicReasoningShape.Either;
 
         // "none" sends no thinking parameter at all, and an unrecognized mode string is the
         // thinking-mode validator's problem, not this one's.
@@ -124,9 +181,10 @@ internal sealed class AnthropicModelReasoning : IAiReasoningCompatibility
     /// <inheritdoc/>
     public string IncompatibleMessage(string profileName) =>
         $"Ai:Profiles:{profileName}:Thinking is not supported by Ai:Profiles:{profileName}:ModelId. "
-        + $"Claude 5 and later models accept only '{AiThinkingModes.Adaptive}' (with Effort); "
-        + $"Claude 4.5 and earlier accept only '{AiThinkingModes.Budget}' (with ThinkingBudgetTokens). "
-        + $"'{AiThinkingModes.None}' works with either.";
+        + $"Claude 5 and later, and Opus/Sonnet 4.7 and later, accept only '{AiThinkingModes.Adaptive}' "
+        + $"(with Effort). Claude 4.5 and earlier, and Haiku, accept only '{AiThinkingModes.Budget}' "
+        + $"(with ThinkingBudgetTokens). Opus/Sonnet 4.6 accept either. "
+        + $"'{AiThinkingModes.None}' works with any model.";
 
     private static bool IsVersionToken(string token)
     {

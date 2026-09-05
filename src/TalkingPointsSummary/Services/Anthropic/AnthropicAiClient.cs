@@ -56,7 +56,9 @@ internal sealed class AnthropicAiClient : IAiClient
             var errorBody = await response.Content.ReadAsStringAsync(ct);
             throw new HttpRequestException(
                 $"Anthropic API request for model '{request.ModelId}' failed with "
-                + $"{(int)response.StatusCode} {response.StatusCode}: {errorBody}");
+                + $"{(int)response.StatusCode} {response.StatusCode}: {errorBody}",
+                inner: null,
+                statusCode: response.StatusCode);
         }
 
         var raw = await response.Content.ReadAsStringAsync(ct);

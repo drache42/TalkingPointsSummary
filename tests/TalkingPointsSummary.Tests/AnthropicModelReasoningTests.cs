@@ -41,6 +41,35 @@ public class AnthropicModelReasoningTests
     }
 
     [Theory]
+    // Opus and Sonnet 4.7/4.8: budget_tokens is removed there, so only adaptive is accepted even
+    // though the major version is 4, not 5.
+    [InlineData("claude-opus-4-7")]
+    [InlineData("claude-opus-4-8")]
+    [InlineData("us.anthropic.claude-opus-4-7-v1:0")]
+    public void GetShape_OpusOrSonnetFourSevenAndLater_IsAdaptive(string modelId)
+    {
+        AnthropicModelReasoning.GetShape(modelId).Should().Be(AnthropicReasoningShape.Adaptive);
+    }
+
+    [Theory]
+    // Opus and Sonnet 4.6 only: budget_tokens still works there as a deprecated transitional
+    // escape hatch alongside the recommended adaptive shape, so both are accepted.
+    [InlineData("claude-opus-4-6")]
+    [InlineData("claude-sonnet-4-6")]
+    public void GetShape_OpusOrSonnetFourSix_IsEither(string modelId)
+    {
+        AnthropicModelReasoning.GetShape(modelId).Should().Be(AnthropicReasoningShape.Either);
+    }
+
+    [Fact]
+    public void GetShape_HaikuAtTheOpusSonnetTransitionalMinorVersion_IsStillBudget()
+    {
+        // Haiku has no adaptive-capable release, so the 4.6 carve-out that applies to Opus and
+        // Sonnet must not also apply to Haiku just because the minor version number matches.
+        AnthropicModelReasoning.GetShape("claude-haiku-4-6").Should().Be(AnthropicReasoningShape.Budget);
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
@@ -84,6 +113,26 @@ public class AnthropicModelReasoningTests
     [InlineData("claude-sonnet-5", AiThinkingModes.None, true)]
     [InlineData("claude-3-5-sonnet-20241022", AiThinkingModes.None, true)]
     public void IsCompatible_ReadableModelId_AnswersForTheFamily(string modelId, string thinking, bool expected)
+    {
+        _reasoning.IsCompatible(modelId, thinking).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("claude-opus-4-6", AiThinkingModes.Adaptive)]
+    [InlineData("claude-opus-4-6", AiThinkingModes.Budget)]
+    [InlineData("claude-opus-4-6", AiThinkingModes.None)]
+    [InlineData("claude-sonnet-4-6", AiThinkingModes.Adaptive)]
+    [InlineData("claude-sonnet-4-6", AiThinkingModes.Budget)]
+    public void IsCompatible_EitherShape_AcceptsAdaptiveAndBudget(string modelId, string thinking)
+    {
+        _reasoning.IsCompatible(modelId, thinking).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("claude-opus-4-7", AiThinkingModes.Budget, false)]
+    [InlineData("claude-opus-4-7", AiThinkingModes.Adaptive, true)]
+    [InlineData("claude-opus-4-8", AiThinkingModes.Budget, false)]
+    public void IsCompatible_OpusFourSevenAndLater_RejectsBudget(string modelId, string thinking, bool expected)
     {
         _reasoning.IsCompatible(modelId, thinking).Should().Be(expected);
     }

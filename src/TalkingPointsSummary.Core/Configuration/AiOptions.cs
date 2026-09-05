@@ -187,6 +187,12 @@ public static class AiReasoningFieldRules
         };
 
     /// <summary>
+    /// Every field this table has a rule for, so a caller checking "is each field used correctly"
+    /// can loop over the table's own keys instead of hardcoding a second copy of the field list.
+    /// </summary>
+    public static readonly IReadOnlyList<AiReasoningField> AllFields = [.. RequiredThinkingMode.Keys];
+
+    /// <summary>
     /// The one <see cref="AiThinkingModes"/> value under which <paramref name="field"/> is used.
     /// </summary>
     public static string RequiredModeFor(AiReasoningField field) => RequiredThinkingMode[field];

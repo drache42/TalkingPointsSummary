@@ -236,6 +236,9 @@ public class AnthropicAiClientTests
         assertion.Which.Message.Should().Contain("400");
         assertion.Which.Message.Should().Contain("claude-sonnet-5");
         assertion.Which.Message.Should().Contain("thinking.type: Field required");
+        // A caller that branches on StatusCode (retryable 5xx vs. non-retryable 4xx) needs this
+        // populated; EnsureSuccessStatusCode() used to set it and the replacement must too.
+        assertion.Which.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     [Fact]
