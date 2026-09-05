@@ -152,6 +152,14 @@ internal sealed class AnthropicModelReasoning : IAiReasoningCompatibility
         var isHaiku = string.Equals(family, HaikuFamily, StringComparison.OrdinalIgnoreCase);
         if (!isHaiku && majorVersion == MixedShapeMajorVersion)
         {
+            // Opus/Sonnet 4.x is the one case where the shape genuinely depends on the minor
+            // version rather than being fixed for the whole major version. An id with no readable
+            // minor (a bare "opus-4", or an alias this parser cannot resolve to a specific
+            // release) does not fall into a default shape here -- there is no version-independent
+            // answer for this major version, so it is Unknown rather than a confident guess.
+            if (minorVersion == -1)
+                return AnthropicReasoningShape.Unknown;
+
             if (minorVersion >= FirstAdaptiveOnlyMinorVersion)
                 return AnthropicReasoningShape.Adaptive;
 

@@ -85,6 +85,18 @@ public sealed class AiProfilesOptions
         MaxTokens = 1,
         Thinking = AiThinkingModes.None
     };
+
+    /// <summary>
+    /// Every profile paired with its configuration key name. Startup validators that must apply
+    /// the same rule to each profile enumerate this once instead of each hardcoding its own copy
+    /// of the profile list, which a profile added later would need to be remembered in every copy.
+    /// </summary>
+    public IEnumerable<(string Name, AiProfileOptions Profile)> All()
+    {
+        yield return (nameof(Categorization), Categorization);
+        yield return (nameof(Summarization), Summarization);
+        yield return (nameof(Validation), Validation);
+    }
 }
 
 /// <summary>

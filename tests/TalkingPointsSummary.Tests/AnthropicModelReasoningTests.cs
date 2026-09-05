@@ -70,6 +70,17 @@ public class AnthropicModelReasoningTests
     }
 
     [Theory]
+    // Opus/Sonnet 4.x is the one major version where shape genuinely depends on the minor
+    // version. An id with no readable minor has no version-independent answer for major 4, so it
+    // must be Unknown rather than a confident (and possibly wrong) default of Budget.
+    [InlineData("claude-opus-4")]
+    [InlineData("claude-sonnet-4-latest")]
+    public void GetShape_OpusOrSonnetFourWithUnreadableMinor_IsUnknown(string modelId)
+    {
+        AnthropicModelReasoning.GetShape(modelId).Should().Be(AnthropicReasoningShape.Unknown);
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]

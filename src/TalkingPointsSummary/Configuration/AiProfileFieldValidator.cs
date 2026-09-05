@@ -24,9 +24,10 @@ internal sealed class AiProfileFieldValidator : IValidateOptions<AiOptions>
     {
         var failures = new List<string>();
 
-        CheckProfile("Categorization", options.Profiles.Categorization, failures);
-        CheckProfile("Summarization", options.Profiles.Summarization, failures);
-        CheckProfile("Validation", options.Profiles.Validation, failures);
+        foreach (var (profileName, profile) in options.Profiles.All())
+        {
+            CheckProfile(profileName, profile, failures);
+        }
 
         return failures.Count > 0
             ? ValidateOptionsResult.Fail(failures)
