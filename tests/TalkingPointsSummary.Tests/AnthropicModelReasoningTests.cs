@@ -89,6 +89,15 @@ public class AnthropicModelReasoningTests
         AnthropicModelReasoning.GetShape(modelId).Should().Be(AnthropicReasoningShape.Unknown);
     }
 
+    [Fact]
+    public void GetShape_VersionTokenIsLiteralZero_DoesNotMisreadTheNextTokenAsMajorVersion()
+    {
+        // A "not found yet" sentinel of 0 would collide with a version token that legitimately
+        // parses to 0: majorVersion would stay 0 after reading "0", so the next token ("5") would
+        // overwrite it instead of becoming the minor version, misclassifying this as Adaptive.
+        AnthropicModelReasoning.GetShape("claude-opus-0-5").Should().Be(AnthropicReasoningShape.Budget);
+    }
+
     /// <summary>
     /// Unknown is a pass-through, not a rejection. A gateway that renames models has to keep
     /// working, so an id this code cannot read constrains nothing.

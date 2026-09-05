@@ -114,8 +114,10 @@ internal sealed class AnthropicModelReasoning : IAiReasoningCompatibility
             .Split(['-', '.', '_', ':'], StringSplitOptions.RemoveEmptyEntries);
 
         string? family = null;
-        var majorVersion = 0;
-        var minorVersion = 0;
+        // -1, not 0: a version token can legitimately parse to 0, so 0 cannot double as the
+        // "not found yet" sentinel without colliding with that real value.
+        var majorVersion = -1;
+        var minorVersion = -1;
 
         foreach (var token in tokens)
         {
@@ -133,13 +135,13 @@ internal sealed class AnthropicModelReasoning : IAiReasoningCompatibility
             if (!IsVersionToken(token))
                 continue;
 
-            if (majorVersion == 0)
+            if (majorVersion == -1)
                 majorVersion = int.Parse(token, CultureInfo.InvariantCulture);
-            else if (minorVersion == 0)
+            else if (minorVersion == -1)
                 minorVersion = int.Parse(token, CultureInfo.InvariantCulture);
         }
 
-        if (family is null || majorVersion == 0)
+        if (family is null || majorVersion == -1)
             return AnthropicReasoningShape.Unknown;
 
         if (majorVersion >= FirstAdaptiveOnlyMajorVersion)
