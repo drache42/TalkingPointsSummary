@@ -90,7 +90,10 @@ internal sealed class AnthropicAiClient : IAiClient
 
             if (!string.IsNullOrWhiteSpace(request.Effort))
             {
-                body["output_config"] = new { effort = request.Effort };
+                // Startup validation accepts Effort case-insensitively (AiEffortLevels.All uses
+                // OrdinalIgnoreCase), so a config value like "High" passes there; the wire value
+                // must still be lowercase, since the provider's effort enum is case-sensitive.
+                body["output_config"] = new { effort = request.Effort.ToLowerInvariant() };
             }
         }
         else if (string.Equals(request.Thinking, AiThinkingModes.Budget, StringComparison.OrdinalIgnoreCase))

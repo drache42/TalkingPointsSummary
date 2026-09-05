@@ -31,7 +31,7 @@ public class SummaryGeneratorTests : IDisposable
             {
                 Summarization = new AiProfileOptions
                 {
-                    ModelId = "claude-sonnet-4-5-20250929",
+                    ModelId = "claude-sonnet-5",
                     MaxTokens = 8192,
                     Thinking = AiThinkingModes.Adaptive,
                     Effort = AiEffortLevels.High
@@ -101,7 +101,7 @@ public class SummaryGeneratorTests : IDisposable
 
         captured.Value.Should().NotBeNull();
         captured.Value!.Prompt.Should().Be("the prompt");
-        captured.Value.ModelId.Should().Be("claude-sonnet-4-5-20250929");
+        captured.Value.ModelId.Should().Be("claude-sonnet-5");
         captured.Value.MaxTokens.Should().Be(8192);
 
         // Reasoning settings that never leave the generator mean every digest is produced with

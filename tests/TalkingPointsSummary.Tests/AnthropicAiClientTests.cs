@@ -155,6 +155,22 @@ public class AnthropicAiClientTests
     }
 
     [Fact]
+    public async Task CompleteAsync_MixedCaseEffort_IsLowercasedOnTheWire()
+    {
+        // Startup validation accepts Effort case-insensitively, so a config value like "High"
+        // passes validation; the provider's effort enum is case-sensitive, so the wire value must
+        // still be normalized or every such call gets HTTP 400.
+        var root = await CaptureRequestBodyAsync(new AiCompletionRequest(
+            "prompt",
+            "claude-sonnet-5",
+            32000,
+            Thinking: AiThinkingModes.Adaptive,
+            Effort: "High"));
+
+        root.GetProperty("output_config").GetProperty("effort").GetString().Should().Be("high");
+    }
+
+    [Fact]
     public async Task CompleteAsync_AdaptiveThinkingWithoutEffort_OmitsOutputConfig()
     {
         var root = await CaptureRequestBodyAsync(new AiCompletionRequest(
