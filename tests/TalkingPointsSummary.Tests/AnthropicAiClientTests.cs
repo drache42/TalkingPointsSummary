@@ -12,6 +12,8 @@ namespace TalkingPointsSummary.Tests;
 
 public class AnthropicAiClientTests
 {
+    private const string TextOnlyResponse = """{"content":[{"type":"text","text":"ok"}]}""";
+
     private static AiOptions DefaultOptions(string apiKey = "test-key") => new()
     {
         Provider = "Anthropic",
@@ -43,6 +45,34 @@ public class AnthropicAiClientTests
                 Content = new StringContent(responseBody, Encoding.UTF8, "application/json")
             });
         return mock;
+    }
+
+    /// <summary>
+    /// Runs a completion against a stubbed handler and returns the JSON body that was actually sent.
+    /// </summary>
+    private static async Task<JsonElement> CaptureRequestBodyAsync(
+        AiCompletionRequest request,
+        string responseBody = TextOnlyResponse)
+    {
+        HttpRequestMessage? capturedRequest = null;
+        var mock = new Mock<HttpMessageHandler>();
+        mock.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedRequest = req)
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent(responseBody, Encoding.UTF8, "application/json")
+            });
+
+        var client = CreateClient(mock.Object);
+        await client.CompleteAsync(request);
+
+        capturedRequest.Should().NotBeNull();
+        var body = await capturedRequest!.Content!.ReadAsStringAsync();
+        return JsonDocument.Parse(body).RootElement.Clone();
     }
 
     [Fact]
@@ -100,29 +130,174 @@ public class AnthropicAiClientTests
     [Fact]
     public async Task CompleteAsync_SendsModelAndMaxTokensInBody()
     {
-        HttpRequestMessage? capturedRequest = null;
-        var mock = new Mock<HttpMessageHandler>();
-        mock.Protected()
-            .Setup<Task<HttpResponseMessage>>("SendAsync",
-                ItExpr.IsAny<HttpRequestMessage>(),
-                ItExpr.IsAny<CancellationToken>())
-            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedRequest = req)
-            .ReturnsAsync(new HttpResponseMessage
-            {
-                StatusCode = HttpStatusCode.OK,
-                Content = new StringContent(
-                    """{"content":[{"type":"text","text":"ok"}]}""",
-                    Encoding.UTF8, "application/json")
-            });
+        var root = await CaptureRequestBodyAsync(
+            new AiCompletionRequest("my prompt", "claude-sonnet-5", 8192));
 
-        var client = CreateClient(mock.Object);
-        await client.CompleteAsync(new AiCompletionRequest("my prompt", "claude-sonnet-4-5-20250929", 8192));
+        root.GetProperty("model").GetString().Should().Be("claude-sonnet-5");
+        root.GetProperty("max_tokens").GetInt32().Should().Be(8192);
+        root.GetProperty("messages")[0].GetProperty("role").GetString().Should().Be("user");
+        root.GetProperty("messages")[0].GetProperty("content").GetString().Should().Be("my prompt");
+    }
 
-        var body = await capturedRequest!.Content!.ReadAsStringAsync();
-        var doc = JsonDocument.Parse(body);
-        doc.RootElement.GetProperty("model").GetString().Should().Be("claude-sonnet-4-5-20250929");
-        doc.RootElement.GetProperty("max_tokens").GetInt32().Should().Be(8192);
-        doc.RootElement.GetProperty("messages")[0].GetProperty("content").GetString().Should().Be("my prompt");
+    [Fact]
+    public async Task CompleteAsync_AdaptiveThinkingWithEffort_SendsAdaptiveThinkingAndOutputConfig()
+    {
+        var root = await CaptureRequestBodyAsync(new AiCompletionRequest(
+            "prompt",
+            "claude-sonnet-5",
+            32000,
+            Thinking: AiThinkingModes.Adaptive,
+            Effort: AiEffortLevels.High));
+
+        root.GetProperty("thinking").GetProperty("type").GetString().Should().Be("adaptive");
+        root.GetProperty("thinking").TryGetProperty("budget_tokens", out _).Should().BeFalse();
+        root.GetProperty("output_config").GetProperty("effort").GetString().Should().Be("high");
+    }
+
+    [Fact]
+    public async Task CompleteAsync_MixedCaseEffort_IsLowercasedOnTheWire()
+    {
+        // Startup validation accepts Effort case-insensitively, so a config value like "High"
+        // passes validation; the provider's effort enum is case-sensitive, so the wire value must
+        // still be normalized or every such call gets HTTP 400.
+        var root = await CaptureRequestBodyAsync(new AiCompletionRequest(
+            "prompt",
+            "claude-sonnet-5",
+            32000,
+            Thinking: AiThinkingModes.Adaptive,
+            Effort: "High"));
+
+        root.GetProperty("output_config").GetProperty("effort").GetString().Should().Be("high");
+    }
+
+    [Fact]
+    public async Task CompleteAsync_AdaptiveThinkingWithoutEffort_OmitsOutputConfig()
+    {
+        var root = await CaptureRequestBodyAsync(new AiCompletionRequest(
+            "prompt",
+            "claude-opus-5",
+            32000,
+            Thinking: AiThinkingModes.Adaptive,
+            Effort: null));
+
+        root.GetProperty("thinking").GetProperty("type").GetString().Should().Be("adaptive");
+        root.TryGetProperty("output_config", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CompleteAsync_BudgetThinking_SendsEnabledThinkingWithBudgetTokens()
+    {
+        var root = await CaptureRequestBodyAsync(new AiCompletionRequest(
+            "prompt",
+            "claude-haiku-4-5-20251001",
+            4096,
+            Thinking: AiThinkingModes.Budget,
+            ThinkingBudgetTokens: 2048));
+
+        root.GetProperty("thinking").GetProperty("type").GetString().Should().Be("enabled");
+        root.GetProperty("thinking").GetProperty("budget_tokens").GetInt32().Should().Be(2048);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_BudgetThinking_NeverSendsEffortEvenWhenProfileSetsIt()
+    {
+        // The provider returns HTTP 400 when effort accompanies budget thinking.
+        var root = await CaptureRequestBodyAsync(new AiCompletionRequest(
+            "prompt",
+            "claude-haiku-4-5-20251001",
+            4096,
+            Thinking: AiThinkingModes.Budget,
+            ThinkingBudgetTokens: 2048,
+            Effort: AiEffortLevels.High));
+
+        root.GetProperty("thinking").GetProperty("type").GetString().Should().Be("enabled");
+        root.TryGetProperty("output_config", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CompleteAsync_ThinkingNone_OmitsThinkingAndOutputConfig()
+    {
+        var root = await CaptureRequestBodyAsync(new AiCompletionRequest(
+            "prompt",
+            "claude-haiku-4-5-20251001",
+            1024,
+            Thinking: AiThinkingModes.None,
+            Effort: AiEffortLevels.High));
+
+        root.TryGetProperty("thinking", out _).Should().BeFalse();
+        root.TryGetProperty("output_config", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CompleteAsync_DefaultRequest_OmitsThinkingAndOutputConfig()
+    {
+        var root = await CaptureRequestBodyAsync(new AiCompletionRequest("prompt", "model", 512));
+
+        root.TryGetProperty("thinking", out _).Should().BeFalse();
+        root.TryGetProperty("output_config", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CompleteAsync_NonSuccessStatus_ThrowsWithResponseBodyInMessage()
+    {
+        // EnsureSuccessStatusCode() would discard this text, leaving the log with a status code
+        // and nothing else -- exactly what the provider's own explanation of a 400 lives in.
+        var handler = CreateMockHandler(HttpStatusCode.BadRequest,
+            """{"type":"error","error":{"type":"invalid_request_error","message":"thinking.type: Field required"}}""");
+        var client = CreateClient(handler.Object);
+
+        var act = async () => await client.CompleteAsync(new AiCompletionRequest("prompt", "claude-sonnet-5", 512));
+
+        var assertion = await act.Should().ThrowAsync<HttpRequestException>();
+        assertion.Which.Message.Should().Contain("400");
+        assertion.Which.Message.Should().Contain("claude-sonnet-5");
+        assertion.Which.Message.Should().Contain("thinking.type: Field required");
+        // A caller that branches on StatusCode (retryable 5xx vs. non-retryable 4xx) needs this
+        // populated; EnsureSuccessStatusCode() used to set it and the replacement must too.
+        assertion.Which.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_LeadingThinkingBlock_SelectsFirstTextBlock()
+    {
+        // A response that leads with a thinking block carries no text on that first block.
+        var handler = CreateMockHandler(HttpStatusCode.OK,
+            """
+            {"content":[
+              {"type":"thinking","thinking":"Let me consider the digest."},
+              {"type":"text","text":"# Weekly digest"},
+              {"type":"text","text":"trailing block"}
+            ]}
+            """);
+        var client = CreateClient(handler.Object);
+
+        var result = await client.CompleteAsync(new AiCompletionRequest("prompt", "claude-opus-5", 32000));
+
+        result.Text.Should().Be("# Weekly digest");
+    }
+
+    [Fact]
+    public async Task CompleteAsync_ThinkingBlockWithEmptyTextProperty_StillSelectsTextBlock()
+    {
+        var handler = CreateMockHandler(HttpStatusCode.OK,
+            """{"content":[{"type":"thinking","text":""},{"type":"text","text":"real answer"}]}""");
+        var client = CreateClient(handler.Object);
+
+        var result = await client.CompleteAsync(new AiCompletionRequest("prompt", "claude-opus-5", 32000));
+
+        result.Text.Should().Be("real answer");
+    }
+
+    [Fact]
+    public async Task CompleteAsync_NoTextBlockInContent_ReturnsEmptyText()
+    {
+        var handler = CreateMockHandler(HttpStatusCode.OK,
+            """{"content":[{"type":"thinking","thinking":"only thinking"}]}""");
+        var client = CreateClient(handler.Object);
+
+        var result = await client.CompleteAsync(new AiCompletionRequest("prompt", "claude-opus-5", 32000));
+
+        result.Text.Should().BeEmpty();
     }
 
     [Fact]

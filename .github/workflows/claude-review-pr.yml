@@ -49,6 +49,6 @@ jobs:
             to highlight specific code issues inline. Do not post a top-level PR summary comment.
             Be concise - flag real issues, not style nitpicks.
           claude_args: |
-            --model claude-sonnet-4-6
-            --effort medium
+            --model claude-sonnet-5
+            --effort high
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*)"

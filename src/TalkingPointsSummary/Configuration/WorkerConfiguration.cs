@@ -80,6 +80,7 @@ internal static class WorkerConfiguration
             {
                 builder.AddRetry(SharedRetryOptions);
             });
+        services.AddSingleton<IAiReasoningCompatibility, AnthropicModelReasoning>();
 
         services.AddHttpClient<INewsletterScraper, NewsletterScraper>(client =>
             {
@@ -138,10 +139,17 @@ internal static class WorkerConfiguration
             .Validate(
                 options => !string.IsNullOrWhiteSpace(options.Anthropic.ApiKey),
                 "Ai:Anthropic:ApiKey is required.")
-            .Validate(options => !string.IsNullOrWhiteSpace(options.Profiles.Categorization.ModelId), "Ai:Profiles:Categorization:ModelId is required.")
-            .Validate(options => !string.IsNullOrWhiteSpace(options.Profiles.Summarization.ModelId), "Ai:Profiles:Summarization:ModelId is required.")
-            .Validate(options => !string.IsNullOrWhiteSpace(options.Profiles.Validation.ModelId), "Ai:Profiles:Validation:ModelId is required.")
             .ValidateOnStart();
+
+        // Per-profile field rules (ModelId, Thinking, Effort, MaxTokens, ThinkingBudgetTokens) are
+        // checked by looping over the three profiles rather than one .Validate() call per profile
+        // per rule. See AiProfileFieldValidator.
+        services.AddSingleton<IValidateOptions<AiOptions>, AiProfileFieldValidator>();
+
+        // Model/thinking compatibility depends on the AI provider's own model-family rules, so it
+        // is resolved through IAiReasoningCompatibility rather than checked inline here. See
+        // AiReasoningCompatibilityValidator.
+        services.AddSingleton<IValidateOptions<AiOptions>, AiReasoningCompatibilityValidator>();
 
         services.AddOptions<BrowserlessOptions>()
             .Bind(configuration.GetSection(BrowserlessOptions.SectionName))

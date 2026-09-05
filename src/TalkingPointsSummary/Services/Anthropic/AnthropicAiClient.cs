@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 using TalkingPointsSummary.Configuration;
 
@@ -13,6 +14,17 @@ namespace TalkingPointsSummary.Services;
 /// </summary>
 internal sealed class AnthropicAiClient : IAiClient
 {
+    /// <summary>
+    /// Content block type carrying the model's visible answer. Extended thinking responses
+    /// place a "thinking" block first, so the answer must be selected by type rather than position.
+    /// </summary>
+    private const string TextBlockType = "text";
+
+    private static readonly JsonSerializerOptions ResponseSerializerOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     private readonly HttpClient _httpClient;
     private readonly AiOptions _options;
 
@@ -31,23 +43,90 @@ internal sealed class AnthropicAiClient : IAiClient
     public async Task<AiCompletionResult> CompleteAsync(AiCompletionRequest request, CancellationToken ct = default)
     {
         var provider = _options.Anthropic;
-        var requestBody = new
-        {
-            model = request.ModelId,
-            max_tokens = request.MaxTokens,
-            messages = new[] { new { role = "user", content = request.Prompt } }
-        };
+        var requestBody = BuildCompletionBody(request);
 
         var httpRequest = BuildRequest(provider, requestBody);
         var response = await _httpClient.SendAsync(httpRequest, ct);
-        response.EnsureSuccessStatusCode();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            // EnsureSuccessStatusCode() throws before the body is ever read, discarding the only
+            // place the provider explains a 400 -- which parameter it rejected and why. That
+            // reason is worth more than a generic status-code exception to whoever reads the log.
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"Anthropic API request for model '{request.ModelId}' failed with "
+                + $"{(int)response.StatusCode} {response.StatusCode}: {errorBody}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
 
         var raw = await response.Content.ReadAsStringAsync(ct);
-        var envelope = JsonSerializer.Deserialize<AnthropicEnvelope>(raw,
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        var envelope = JsonSerializer.Deserialize<AnthropicEnvelope>(raw, ResponseSerializerOptions);
 
-        var text = envelope?.Content?.FirstOrDefault()?.Text ?? string.Empty;
+        var text = SelectTextBlock(envelope);
         return new AiCompletionResult(text, raw);
+    }
+
+    /// <summary>
+    /// Builds the messages API request body, adding the thinking and effort parameters that the
+    /// requested profile calls for.
+    /// </summary>
+    /// <param name="request">Completion request carrying the profile values.</param>
+    /// <returns>An object graph ready for JSON serialization.</returns>
+    private static object BuildCompletionBody(AiCompletionRequest request)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["model"] = request.ModelId,
+            ["max_tokens"] = request.MaxTokens,
+            ["messages"] = new[] { new { role = "user", content = request.Prompt } }
+        };
+
+        if (string.Equals(request.Thinking, AiThinkingModes.Adaptive, StringComparison.OrdinalIgnoreCase))
+        {
+            // Claude 5 family: adaptive thinking plus an optional reasoning effort level.
+            body["thinking"] = new { type = "adaptive" };
+
+            if (!string.IsNullOrWhiteSpace(request.Effort))
+            {
+                // Startup validation accepts Effort case-insensitively (AiEffortLevels.All uses
+                // OrdinalIgnoreCase), so a config value like "High" passes there; the wire value
+                // must still be lowercase, since the provider's effort enum is case-sensitive.
+                body["output_config"] = new { effort = request.Effort.ToLowerInvariant() };
+            }
+        }
+        else if (string.Equals(request.Thinking, AiThinkingModes.Budget, StringComparison.OrdinalIgnoreCase))
+        {
+            // Claude 4.5 and earlier: fixed thinking budget, and the effort parameter is not supported.
+            body["thinking"] = new { type = "enabled", budget_tokens = request.ThinkingBudgetTokens };
+        }
+
+        return body;
+    }
+
+    /// <summary>
+    /// Returns the text of the first content block whose type is "text".
+    /// </summary>
+    /// <param name="envelope">Deserialized response envelope, possibly null.</param>
+    /// <returns>The model's visible answer, or an empty string when no text block is present.</returns>
+    private static string SelectTextBlock(AnthropicEnvelope? envelope)
+    {
+        if (envelope?.Content is null)
+        {
+            return string.Empty;
+        }
+
+        foreach (var block in envelope.Content)
+        {
+            if (block is not null
+                && string.Equals(block.Type, TextBlockType, StringComparison.OrdinalIgnoreCase))
+            {
+                return block.Text ?? string.Empty;
+            }
+        }
+
+        return string.Empty;
     }
 
     /// <inheritdoc/>
@@ -105,12 +184,16 @@ internal sealed class AnthropicAiClient : IAiClient
 
     private sealed class AnthropicEnvelope
     {
-        public List<AnthropicContentBlock>? Content { get; set; }
+        [JsonPropertyName("content")]
+        public List<AnthropicContentBlock?>? Content { get; set; }
     }
 
     private sealed class AnthropicContentBlock
     {
-        public string Type { get; set; } = string.Empty;
-        public string Text { get; set; } = string.Empty;
+        [JsonPropertyName("type")]
+        public string? Type { get; set; }
+
+        [JsonPropertyName("text")]
+        public string? Text { get; set; }
     }
 }

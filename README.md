@@ -165,7 +165,12 @@ The worker loads configuration in this order:
 | Setting | Environment variable | Default | Required | Notes |
 | --- | --- | --- | --- | --- |
 | `ConnectionStrings:TalkingPoints` | `ConnectionStrings__TalkingPoints` | empty | Yes | PostgreSQL connection string |
-| `Anthropic:ApiKey` | `Anthropic__ApiKey` | empty | Yes | Used by both message categorization and summary generation |
+| `Ai:Anthropic:ApiKey` | `Ai__Anthropic__ApiKey` | empty | Yes | Used by both message categorization and summary generation |
+| `Ai:Profiles:<Profile>:ModelId` | `Ai__Profiles__<Profile>__ModelId` | see below | Yes | Model per profile. Profiles are `Categorization`, `Summarization`, and `Validation` |
+| `Ai:Profiles:<Profile>:MaxTokens` | `Ai__Profiles__<Profile>__MaxTokens` | see below | No | Output ceiling. Thinking tokens count against it, so thinking profiles need a larger value |
+| `Ai:Profiles:<Profile>:Thinking` | `Ai__Profiles__<Profile>__Thinking` | see below | No | `none`, `adaptive`, or `budget`. Claude 5 and later, and Opus/Sonnet 4.7 and later, accept only `adaptive`; Claude 4.5 and earlier, and Haiku, accept only `budget`; Opus/Sonnet 4.6 accept either. A mismatch fails at startup rather than on every call |
+| `Ai:Profiles:<Profile>:Effort` | `Ai__Profiles__<Profile>__Effort` | see below | No | `low`, `medium`, `high`, `xhigh`, or `max`. Valid only when `Thinking` is `adaptive`; setting it with `none` or `budget` fails at startup |
+| `Ai:Profiles:<Profile>:ThinkingBudgetTokens` | `Ai__Profiles__<Profile>__ThinkingBudgetTokens` | `0` | No | Valid only when `Thinking` is `budget` (setting it with `none` or `adaptive` fails at startup); must then be at least 1024 and leave at least 256 tokens of `MaxTokens` for the visible response |
 | `Browserless:BaseUrl` | `Browserless__BaseUrl` | `http://browserless:3000` | Yes | Must be an absolute URL |
 | `DebugFeatures:Enabled` | `DebugFeatures__Enabled` | `false` | No | When `true`, the worker runs the debug web host and exposes `POST /debug/pipeline/run-now` |
 | `NewsletterScrapingSecurity:Enabled` | `NewsletterScrapingSecurity__Enabled` | `true` | No | Enables URL validation before Browserless is called |
@@ -181,6 +186,14 @@ The worker loads configuration in this order:
 | `PipelineSchedule:DayOfWeek` | `PipelineSchedule__DayOfWeek` | `1` | No | Weekly schedule day, where `0=Sunday` and `1=Monday`. Interpreted in `PipelineSchedule:TimeZone` when set, otherwise UTC. |
 | `PipelineSchedule:Hour` | `PipelineSchedule__Hour` | `8` | No | Weekly schedule hour in 24-hour time. Interpreted in `PipelineSchedule:TimeZone` when set, otherwise UTC. |
 | `PipelineSchedule:TimeZone` | `PipelineSchedule__TimeZone` | `UTC` | No | Timezone for the schedule. Accepts IANA (`America/New_York`) or Windows (`Eastern Standard Time`) format. |
+
+Profile defaults:
+
+| Profile | ModelId | MaxTokens | Thinking | Effort | Used by |
+| --- | --- | --- | --- | --- | --- |
+| `Categorization` | `claude-haiku-4-5-20251001` | `1024` | `none` | unset | Message categorization |
+| `Summarization` | `claude-sonnet-5` | `32000` | `adaptive` | `high` | Digest generation |
+| `Validation` | `claude-haiku-4-5-20251001` | `1` | `none` | unset | The `check-config` credential probe |
 
 ### Admin settings
 
