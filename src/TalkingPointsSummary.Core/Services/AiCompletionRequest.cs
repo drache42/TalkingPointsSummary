@@ -1,3 +1,5 @@
+using TalkingPointsSummary.Configuration;
+
 namespace TalkingPointsSummary.Services;
 
 /// <summary>
@@ -19,6 +21,6 @@ public record AiCompletionRequest(
     string Prompt,
     string ModelId,
     int MaxTokens,
-    string Thinking = "none",
+    string Thinking = AiThinkingModes.None,
     int ThinkingBudgetTokens = 0,
     string? Effort = null);

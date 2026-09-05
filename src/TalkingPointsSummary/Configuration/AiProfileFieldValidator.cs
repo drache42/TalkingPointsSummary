@@ -61,7 +61,8 @@ internal sealed class AiProfileFieldValidator : IValidateOptions<AiOptions>
             {
                 failures.Add(
                     $"Ai:Profiles:{profileName}:{field} is only used when Ai:Profiles:{profileName}:Thinking is "
-                    + $"'{AiReasoningFieldRules.RequiredModeFor(field)}'; it is otherwise ignored.");
+                    + $"'{AiReasoningFieldRules.RequiredModeFor(field)}'; remove it or set Thinking to "
+                    + $"'{AiReasoningFieldRules.RequiredModeFor(field)}'.");
             }
         }
 
