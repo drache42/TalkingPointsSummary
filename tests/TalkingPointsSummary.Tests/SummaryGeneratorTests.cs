@@ -40,12 +40,14 @@ public class SummaryGeneratorTests : IDisposable
         };
     }
 
-    private SummaryGenerator CreateGenerator(TimeProvider? timeProvider = null)
+    private SummaryGenerator CreateGenerator(
+        TimeProvider? timeProvider = null,
+        PipelineScheduleOptions? schedule = null)
         => new(
             _mockAiClient.Object,
             _db,
             Options.Create(_aiOptions),
-            Options.Create(new PipelineScheduleOptions()),
+            Options.Create(schedule ?? new PipelineScheduleOptions()),
             NullLogger<SummaryGenerator>.Instance,
             new GradeCalculator(),
             timeProvider);
@@ -163,6 +165,42 @@ public class SummaryGeneratorTests : IDisposable
         var result = await generator.ExecutePromptAsync("prompt");
 
         result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task BuildPromptAsync_RendersNewsItemDateSentInScheduleTimeZone_NotUtc()
+    {
+        var parent = await SeedParentAsync();
+        await SeedChildAsync(parent.Id);
+
+        // 2026-05-15 01:30 UTC == 2026-05-14 21:30 America/New_York (EDT, UTC-04:00).
+        // Rendered in UTC this reads "Friday, May 15"; in the schedule zone it is Thursday the 14th.
+        _db.NewsItems.Add(new NewsItem
+        {
+            ParentId = parent.Id,
+            SourceMessageId = Guid.NewGuid().ToString(),
+            SourceType = SourceType.MessageText,
+            NewsContent = "Early dismissal tomorrow",
+            AiSummary = "dismissal",
+            FromName = "Teacher",
+            StudentName = "Test Child",
+            SentAt = new DateTime(2026, 5, 15, 1, 30, 0, DateTimeKind.Utc),
+            AnalyzedAt = new DateTime(2026, 5, 15, 2, 0, 0, DateTimeKind.Utc),
+            CreatedAt = new DateTime(2026, 5, 15, 2, 0, 0, DateTimeKind.Utc)
+        });
+        await _db.SaveChangesAsync();
+
+        var generator = CreateGenerator(
+            new FixedTimeProvider(new DateTimeOffset(2026, 5, 17, 12, 0, 0, TimeSpan.Zero)),
+            new PipelineScheduleOptions { TimeZone = "America/New_York" });
+
+        var result = await generator.BuildPromptAsync(parent);
+
+        result!.Prompt.Should().Contain(
+            "Date Sent: Thursday, May 14, 2026 9:30 PM (school local time, UTC-04:00)");
+        // The full template's calendar legitimately lists every nearby date, so guard only the
+        // Date Sent line against the UTC-day rendering.
+        result.Prompt.Should().NotContain("Date Sent: Friday, May 15");
     }
 
     [Fact]

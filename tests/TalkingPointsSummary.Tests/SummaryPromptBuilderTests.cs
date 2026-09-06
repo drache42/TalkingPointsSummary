@@ -133,7 +133,8 @@ public class SummaryPromptBuilderTests
             []);
 
         prompt.Should().Contain("Date Sent: Thursday, May 14, 2026 8:30 PM (school local time, UTC-04:00)");
-        prompt.Should().NotContain("May 15");
+        // Guard against a regression that drops the conversion and renders the UTC day instead.
+        prompt.Should().NotContain("Friday, May 15, 2026");
     }
 
     /// <summary>
