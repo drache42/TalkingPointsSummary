@@ -35,7 +35,11 @@ public class MessageCategorizerTests
                     ?? new AiProfileOptions { ModelId = "claude-haiku-4-5-20251001", MaxTokens = 1024 }
             }
         });
-        return new MessageCategorizer(mockAiClient.Object, options, NullLogger<MessageCategorizer>.Instance);
+        return new MessageCategorizer(
+            mockAiClient.Object,
+            options,
+            Options.Create(new PipelineScheduleOptions()),
+            NullLogger<MessageCategorizer>.Instance);
     }
 
     [Fact]

@@ -48,20 +48,24 @@ public partial class MessageCategorizer : IMessageCategorizer
     private readonly IAiClient _aiClient;
     private readonly AiOptions _options;
     private readonly ILogger<MessageCategorizer> _logger;
+    private readonly TimeZoneInfo _scheduleTimeZone;
 
     /// <summary>
     /// Initializes a message categorizer.
     /// </summary>
     /// <param name="aiClient">AI client used to send categorization requests.</param>
     /// <param name="aiOptions">AI configuration including the categorization profile.</param>
+    /// <param name="schedule">Pipeline schedule configuration, used to render message dates in the local timezone.</param>
     /// <param name="logger">Logger used for categorization diagnostics.</param>
     public MessageCategorizer(
         IAiClient aiClient,
         IOptions<AiOptions> aiOptions,
+        IOptions<PipelineScheduleOptions> schedule,
         ILogger<MessageCategorizer> logger)
     {
         _aiClient = aiClient;
         _options = aiOptions.Value;
+        _scheduleTimeZone = TimeZoneInfo.FindSystemTimeZoneById(schedule.Value.TimeZone);
         _logger = logger;
     }
 
@@ -75,7 +79,7 @@ public partial class MessageCategorizer : IMessageCategorizer
         _logger.LogInformation("Categorizing message {MessageId} from {FromName}",
             message.ExternalMessageId, message.FromName);
 
-        var prompt = PromptBuilder.Build(message);
+        var prompt = PromptBuilder.Build(message, _scheduleTimeZone);
         var profile = _options.Profiles.Categorization;
 
         // The reasoning settings travel with the profile, so a categorization profile configured

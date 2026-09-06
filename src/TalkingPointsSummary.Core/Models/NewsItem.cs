@@ -67,7 +67,8 @@ public class NewsItem
     public string StudentName { get; set; } = string.Empty;
 
     /// <summary>
-    /// UTC time when the source message was sent.
+    /// UTC send instant copied from the source message. Rendered in the schedule's local timezone
+    /// when placed in the summary prompt so relative dates resolve against the reader's calendar.
     /// </summary>
     public DateTime SentAt { get; set; }
 

@@ -50,6 +50,15 @@ public class MessageDeduplicator : IMessageDeduplicator
             if (existingIds.Contains(apiMsg.Id))
                 continue;
 
+            var apiSentAt = apiMsg.DisplayDate ?? apiMsg.CreatedAt;
+            if (apiSentAt is null)
+            {
+                _logger.LogWarning(
+                    "Message {ExternalMessageId} for parent {ParentName} has no DisplayDate or CreatedAt from the API; " +
+                    "using the current fetch time as the sent timestamp. Relative date references in this message may be misdated in the digest.",
+                    apiMsg.Id, parent.Name);
+            }
+
             var message = new Message
             {
                 ParentId = parent.Id,
@@ -58,7 +67,7 @@ public class MessageDeduplicator : IMessageDeduplicator
                 StudentName = apiMsg.ContactInfo?.StudentName ?? string.Empty,
                 FromName = apiMsg.From?.User?.Signature ?? apiMsg.FromName ?? string.Empty,
                 MessageText = apiMsg.Text ?? string.Empty,
-                SentAt = apiMsg.DisplayDate ?? apiMsg.CreatedAt ?? now,
+                SentAt = apiSentAt ?? now,
                 CreatedAt = now
             };
 

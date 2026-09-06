@@ -185,7 +185,7 @@ The worker loads configuration in this order:
 | `Smtp:FromEmail` | `Smtp__FromEmail` | empty in base config, `dev@example.com` in Development | Yes | Sender address |
 | `PipelineSchedule:DayOfWeek` | `PipelineSchedule__DayOfWeek` | `1` | No | Weekly schedule day, where `0=Sunday` and `1=Monday`. Interpreted in `PipelineSchedule:TimeZone` when set, otherwise UTC. |
 | `PipelineSchedule:Hour` | `PipelineSchedule__Hour` | `8` | No | Weekly schedule hour in 24-hour time. Interpreted in `PipelineSchedule:TimeZone` when set, otherwise UTC. |
-| `PipelineSchedule:TimeZone` | `PipelineSchedule__TimeZone` | `UTC` | No | Timezone for the schedule. Accepts IANA (`America/New_York`) or Windows (`Eastern Standard Time`) format. |
+| `PipelineSchedule:TimeZone` | `PipelineSchedule__TimeZone` | `UTC` | No | Timezone for the schedule. Also the timezone the digest treats as "today" and the timezone message send times are shown to the model in, so relative dates ("this Thursday", "tomorrow") resolve against the family's local calendar. Leaving it at `UTC` for a non-UTC school is a correctness issue, not just a scheduling preference. Accepts IANA (`America/New_York`) or Windows (`Eastern Standard Time`) format. |
 
 Profile defaults:
 
