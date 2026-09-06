@@ -131,28 +131,13 @@ public sealed class SummaryPromptBuilder
             builder.AppendLine($"Student: {item.StudentName}");
             builder.AppendLine($"From: {item.FromName}");
             builder.AppendLine($"Type: {(item.SourceType == SourceType.NewsletterUrl ? "Newsletter" : "Direct Message")}");
-            builder.AppendLine($"Date Sent: {FormatSentAt(item.SentAt, timeZone)}");
+            builder.AppendLine($"Date Sent: {PromptDateFormatter.FormatSentAt(item.SentAt, timeZone)}");
             builder.AppendLine($"Content: {item.NewsContent}");
             builder.AppendLine("---");
             builder.AppendLine();
         }
 
         return builder.ToString().TrimEnd();
-    }
-
-    /// <summary>
-    /// Renders a stored UTC send timestamp in the same local timezone as "today" so the model
-    /// resolves relative references ("this Thursday", "tomorrow") against the reader's calendar
-    /// rather than against a UTC day that may have already rolled over.
-    /// </summary>
-    private static string FormatSentAt(DateTime sentAtUtc, TimeZoneInfo timeZone)
-    {
-        var utc = DateTime.SpecifyKind(sentAtUtc, DateTimeKind.Utc);
-        var local = TimeZoneInfo.ConvertTimeFromUtc(utc, timeZone);
-        var localWithOffset = new DateTimeOffset(local, timeZone.GetUtcOffset(local));
-        var friendly = localWithOffset.ToString("dddd, MMMM d, yyyy h:mm tt", CultureInfo.InvariantCulture);
-        var offset = localWithOffset.ToString("zzz", CultureInfo.InvariantCulture);
-        return $"{friendly} (school local time, UTC{offset})";
     }
 
     private static string BuildPreviousSummaries(IReadOnlyList<Summary> previousSummaries)

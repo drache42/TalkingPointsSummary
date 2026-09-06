@@ -1,4 +1,3 @@
-using System.Globalization;
 using TalkingPointsSummary.Models;
 
 namespace TalkingPointsSummary.Services;
@@ -48,20 +47,10 @@ public sealed class MessageCategorizationPromptBuilder
     {
         var prompt = _template;
         prompt = prompt.Replace(FromNameToken, message.FromName, StringComparison.Ordinal);
-        prompt = prompt.Replace(DateToken, FormatSentAt(message.SentAt, timeZone), StringComparison.Ordinal);
+        prompt = prompt.Replace(DateToken, PromptDateFormatter.FormatSentAt(message.SentAt, timeZone), StringComparison.Ordinal);
         prompt = prompt.Replace(MessageTextToken, message.MessageText, StringComparison.Ordinal);
         prompt = prompt.Replace(MessageIdToken, message.ExternalMessageId, StringComparison.Ordinal);
         return prompt;
-    }
-
-    private static string FormatSentAt(DateTime sentAtUtc, TimeZoneInfo timeZone)
-    {
-        var utc = DateTime.SpecifyKind(sentAtUtc, DateTimeKind.Utc);
-        var local = TimeZoneInfo.ConvertTimeFromUtc(utc, timeZone);
-        var localWithOffset = new DateTimeOffset(local, timeZone.GetUtcOffset(local));
-        var friendly = localWithOffset.ToString("dddd, MMMM d, yyyy h:mm tt", CultureInfo.InvariantCulture);
-        var offset = localWithOffset.ToString("zzz", CultureInfo.InvariantCulture);
-        return $"{friendly} (school local time, UTC{offset})";
     }
 
     private static string LoadDefaultTemplate()
