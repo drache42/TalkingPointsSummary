@@ -39,11 +39,15 @@ public sealed class MessageCategorizationPromptBuilder
     /// Builds a categorization prompt for a stored message.
     /// </summary>
     /// <param name="message">Message to describe in the prompt.</param>
-    public string Build(Message message)
+    /// <param name="timeZone">
+    /// Timezone used to render the message's stored UTC send timestamp, so relative references in the
+    /// body ("this Thursday", "tomorrow") are anchored to the reader's local calendar day.
+    /// </param>
+    public string Build(Message message, TimeZoneInfo timeZone)
     {
         var prompt = _template;
         prompt = prompt.Replace(FromNameToken, message.FromName, StringComparison.Ordinal);
-        prompt = prompt.Replace(DateToken, message.SentAt.ToString("O"), StringComparison.Ordinal);
+        prompt = prompt.Replace(DateToken, PromptDateFormatter.FormatSentAt(message.SentAt, timeZone), StringComparison.Ordinal);
         prompt = prompt.Replace(MessageTextToken, message.MessageText, StringComparison.Ordinal);
         prompt = prompt.Replace(MessageIdToken, message.ExternalMessageId, StringComparison.Ordinal);
         return prompt;

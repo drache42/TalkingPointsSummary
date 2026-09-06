@@ -24,7 +24,8 @@ public class MessageCategorizerTests
 
     private static MessageCategorizer CreateCategorizer(
         Mock<IAiClient> mockAiClient,
-        AiProfileOptions? categorization = null)
+        AiProfileOptions? categorization = null,
+        PipelineScheduleOptions? schedule = null)
     {
         var options = Options.Create(new AiOptions
         {
@@ -35,7 +36,11 @@ public class MessageCategorizerTests
                     ?? new AiProfileOptions { ModelId = "claude-haiku-4-5-20251001", MaxTokens = 1024 }
             }
         });
-        return new MessageCategorizer(mockAiClient.Object, options, NullLogger<MessageCategorizer>.Instance);
+        return new MessageCategorizer(
+            mockAiClient.Object,
+            options,
+            Options.Create(schedule ?? new PipelineScheduleOptions()),
+            NullLogger<MessageCategorizer>.Instance);
     }
 
     [Fact]
@@ -65,6 +70,36 @@ public class MessageCategorizerTests
         captured.Thinking.Should().Be(AiThinkingModes.Budget);
         captured.ThinkingBudgetTokens.Should().Be(2048);
         captured.Effort.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CategorizeAsync_RendersMessageDateInScheduleTimeZone_NotUtc()
+    {
+        var mock = new Mock<IAiClient>();
+        AiCompletionRequest? captured = null;
+        mock.Setup(c => c.CompleteAsync(It.IsAny<AiCompletionRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<AiCompletionRequest, CancellationToken>((request, _) => captured = request)
+            .ReturnsAsync(new AiCompletionResult("""{"message_id":"msg-evening","is_news_itself":true,"summary":"s"}"""));
+
+        var categorizer = CreateCategorizer(
+            mock,
+            schedule: new PipelineScheduleOptions { TimeZone = "America/New_York" });
+
+        var message = new Message
+        {
+            ExternalMessageId = "msg-evening",
+            FromName = "Teacher",
+            MessageText = "Early dismissal tomorrow",
+            // 2026-05-15 01:30 UTC == 2026-05-14 21:30 America/New_York (EDT, UTC-04:00).
+            // Rendered in UTC this reads "Friday, May 15"; the schedule zone must win.
+            SentAt = new DateTime(2026, 5, 15, 1, 30, 0, DateTimeKind.Utc)
+        };
+
+        await categorizer.CategorizeAsync(message);
+
+        captured.Should().NotBeNull();
+        captured!.Prompt.Should().Contain("Thursday, May 14, 2026 9:30 PM (school local time, UTC-04:00)");
+        captured.Prompt.Should().NotContain("Friday, May 15, 2026");
     }
 
     private static Mock<IAiClient> CreateMockAiClient(string responseText)

@@ -66,12 +66,17 @@ public sealed class SummaryPromptBuilder
     /// <summary>
     /// Builds the final prompt text by filling the template with current context and recent content.
     /// </summary>
-    /// <param name="now">Current date used for prompt tokens and grade labels.</param>
+    /// <param name="now">Current local date used for prompt tokens and grade labels, in <paramref name="timeZone"/>.</param>
+    /// <param name="timeZone">
+    /// Timezone that <paramref name="now"/> is expressed in. Each news item's stored UTC "Date Sent"
+    /// is converted into this zone so the model resolves relative dates against the same calendar as today.
+    /// </param>
     /// <param name="children">Children included in the summary.</param>
     /// <param name="newsItems">Recent news items available for summarization.</param>
     /// <param name="previousSummaries">Recent summaries used as historical context.</param>
     public string Build(
         DateTime now,
+        TimeZoneInfo timeZone,
         List<Child> children,
         List<NewsItem> newsItems,
         List<Summary> previousSummaries)
@@ -81,7 +86,7 @@ public sealed class SummaryPromptBuilder
         prompt = prompt.Replace(SummaryTitleToken, $"# 🏫 School News Digest — {now.ToString("dddd, MMMM d, yyyy", CultureInfo.InvariantCulture)}", StringComparison.Ordinal);
         prompt = prompt.Replace(WeekCalendarToken, BuildDateReferenceCalendar(now), StringComparison.Ordinal);
         prompt = prompt.Replace(ContextToken, BuildContext(children, now), StringComparison.Ordinal);
-        prompt = prompt.Replace(RecentNewsToken, BuildRecentNews(newsItems), StringComparison.Ordinal);
+        prompt = prompt.Replace(RecentNewsToken, BuildRecentNews(newsItems, timeZone), StringComparison.Ordinal);
         prompt = prompt.Replace(PreviousSummariesToken, BuildPreviousSummaries(previousSummaries), StringComparison.Ordinal);
         prompt = prompt.Replace(SchoolWideSectionsToken, BuildSchoolWideSections(children), StringComparison.Ordinal);
         prompt = prompt.Replace(ChildSectionsToken, BuildChildSections(children, now), StringComparison.Ordinal);
@@ -92,7 +97,9 @@ public sealed class SummaryPromptBuilder
     private static string BuildDateReferenceCalendar(DateTime now)
     {
         var builder = new StringBuilder();
-        for (var i = -14; i <= 120; i++)
+        // Lower bound covers the six-week (42-day) recent-news window so every item in the prompt,
+        // and any relative reference it anchors, has a calendar-backed day of week.
+        for (var i = -45; i <= 120; i++)
         {
             var date = now.AddDays(i);
             var formatted = date.ToString("dddd, MMMM d, yyyy", CultureInfo.InvariantCulture);
@@ -113,7 +120,7 @@ public sealed class SummaryPromptBuilder
         return builder.ToString().TrimEnd();
     }
 
-    private static string BuildRecentNews(IReadOnlyList<NewsItem> newsItems)
+    private static string BuildRecentNews(IReadOnlyList<NewsItem> newsItems, TimeZoneInfo timeZone)
     {
         var builder = new StringBuilder();
 
@@ -124,7 +131,7 @@ public sealed class SummaryPromptBuilder
             builder.AppendLine($"Student: {item.StudentName}");
             builder.AppendLine($"From: {item.FromName}");
             builder.AppendLine($"Type: {(item.SourceType == SourceType.NewsletterUrl ? "Newsletter" : "Direct Message")}");
-            builder.AppendLine($"Date Sent: {item.SentAt:O}");
+            builder.AppendLine($"Date Sent: {PromptDateFormatter.FormatSentAt(item.SentAt, timeZone)}");
             builder.AppendLine($"Content: {item.NewsContent}");
             builder.AppendLine("---");
             builder.AppendLine();

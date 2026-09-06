@@ -75,7 +75,7 @@ public class SummaryGenerator : ISummaryGenerator
             .Where(c => c.ParentId == parent.Id)
             .ToListAsync(ct);
 
-        var prompt = _promptBuilder.Build(nowLocal, children, newsItems, previousSummaries);
+        var prompt = _promptBuilder.Build(nowLocal, _scheduleTimeZone, children, newsItems, previousSummaries);
         return new SummaryPromptResult(prompt, newsItems.Count);
     }
 

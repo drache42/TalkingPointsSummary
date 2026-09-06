@@ -41,7 +41,9 @@ public class Message
     public string MessageText { get; set; } = string.Empty;
 
     /// <summary>
-    /// UTC time when the message was sent.
+    /// UTC instant the message was sent, taken from the TalkingPoints API (DisplayDate, falling back
+    /// to CreatedAt). Falls back to the fetch time when the API supplies neither, so it is not
+    /// guaranteed to be the true send time in that case.
     /// </summary>
     public DateTime SentAt { get; set; }
 

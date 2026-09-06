@@ -20,9 +20,9 @@ public class MessageCategorizationPromptBuilderTests
             ExternalMessageId = "abc123"
         };
 
-        var prompt = builder.Build(message);
+        var prompt = builder.Build(message, TimeZoneInfo.Utc);
 
-        prompt.Should().Be("From=Ms. Zutz|Date=2026-03-07T00:19:28.0000000Z|Text=Here is the newsletter: https://app.smore.com/n/rekj9|Id=abc123");
+        prompt.Should().Be("From=Ms. Zutz|Date=Saturday, March 7, 2026 12:19 AM (school local time, UTC+00:00)|Text=Here is the newsletter: https://app.smore.com/n/rekj9|Id=abc123");
     }
 
     [Fact]
@@ -39,7 +39,7 @@ public class MessageCategorizationPromptBuilderTests
             ExternalMessageId = "msg-special"
         };
 
-        var prompt = builder.Build(message);
+        var prompt = builder.Build(message, TimeZoneInfo.Utc);
 
         // Characters should pass through unchanged — this goes to an LLM, not HTML
         prompt.Should().Contain("<b>Bold</b>");
@@ -48,21 +48,22 @@ public class MessageCategorizationPromptBuilderTests
     }
 
     [Fact]
-    public void Build_DateSent_IsIso8601RoundTripFormat()
+    public void Build_DateSent_IsRenderedInSuppliedLocalTimeZone()
     {
         var builder = new MessageCategorizationPromptBuilder("{{DATE_SENT}}");
+        var eastern = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
 
         var message = new Message
         {
             FromName = "Teacher",
-            SentAt = new DateTime(2026, 3, 7, 14, 30, 45, DateTimeKind.Utc),
+            // 2026-05-15 01:30 UTC == 2026-05-14 21:30 America/New_York (EDT, UTC-04:00)
+            SentAt = new DateTime(2026, 5, 15, 1, 30, 45, DateTimeKind.Utc),
             MessageText = "Test",
             ExternalMessageId = "msg-date"
         };
 
-        var prompt = builder.Build(message);
+        var prompt = builder.Build(message, eastern);
 
-        // ISO 8601 round-trip format ("O") should produce something like 2026-03-07T14:30:45.0000000Z
-        prompt.Should().MatchRegex(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{7}Z$");
+        prompt.Should().Be("Thursday, May 14, 2026 9:30 PM (school local time, UTC-04:00)");
     }
 }

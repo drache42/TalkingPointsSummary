@@ -230,6 +230,41 @@ public class MessageDeduplicatorTests : IDisposable
         saved.SentAt.Should().Be(new DateTime(2026, 3, 7, 10, 0, 0, DateTimeKind.Utc));
     }
 
+    [Fact]
+    public async Task DeduplicateAndSaveAsync_UsesCreatedAtWhenDisplayDateMissing()
+    {
+        var apiMessages = new List<TalkingPointsMessage>
+        {
+            new()
+            {
+                Id = "msg-created-only",
+                Text = "Hello parents!",
+                DisplayDate = null,
+                CreatedAt = new DateTime(2026, 3, 6, 9, 0, 0, DateTimeKind.Utc)
+            }
+        };
+
+        var result = await _deduplicator.DeduplicateAndSaveAsync(_testParent, apiMessages);
+
+        result[0].SentAt.Should().Be(new DateTime(2026, 3, 6, 9, 0, 0, DateTimeKind.Utc));
+    }
+
+    [Fact]
+    public async Task DeduplicateAndSaveAsync_FallsBackToFetchTimeWhenApiSuppliesNoDate()
+    {
+        // The API gave neither DisplayDate nor CreatedAt; SentAt falls back to the fetch time
+        // (and the deduplicator logs a warning that the value is not a real send time).
+        var apiMessages = new List<TalkingPointsMessage>
+        {
+            new() { Id = "msg-no-date", Text = "Hello parents!", DisplayDate = null, CreatedAt = null }
+        };
+
+        var result = await _deduplicator.DeduplicateAndSaveAsync(_testParent, apiMessages);
+
+        result[0].SentAt.Should().Be(FixedUtcNow.UtcDateTime);
+        result[0].SentAt.Should().Be(result[0].CreatedAt);
+    }
+
     public void Dispose()
     {
         _db.Dispose();
