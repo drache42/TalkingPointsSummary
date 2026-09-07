@@ -49,7 +49,7 @@ The main pipeline is defined in `.github/workflows/main.yml`.
 
 On success for `main` pushes, three jobs run in sequence after `validate`:
 
-1. **`compute-version`** — queries all PRs merged since the last release tag, takes the highest `semver:` label, and computes the next version. If all merged PRs carry `skip-release`, outputs `skip=true` and no release is created.
+1. **`compute-version`** — collects every merged PR whose merge commit is not already contained in the latest release tag, takes the highest `semver:` label, and computes the next version. If all merged PRs carry `skip-release`, outputs `skip=true` and no release is created.
 2. **`publish-main-images`** — builds and pushes both container images to `ghcr.io`, stamping `VERSION` and `COMMIT_SHA` into the binaries via `dotnet publish`.
 3. **`auto-release`** — skipped when `skip=true`. Creates an annotated git tag and promotes both images to versioned release tags.
 
@@ -92,7 +92,7 @@ Container versioning is split into build identity and release identity.
 
 ### Automated release flow
 
-Releases are created automatically when a PR merges to `main`. The `compute-version` job reads the `semver:` labels of all PRs merged since the last release tag and bumps the version accordingly. No manual tagging is required for day-to-day releases.
+Releases are created automatically when a PR merges to `main`. The `compute-version` job reads the `semver:` labels of every merged PR whose merge commit is not yet contained in the latest release tag and bumps the version accordingly. Membership is decided with `git merge-base --is-ancestor` rather than a merge-timestamp comparison, so the PR that was just released is never re-counted into the next window (see issue #128). The timestamp comparison remains only as a fallback for the first release, when no tag exists yet. No manual tagging is required for day-to-day releases.
 
 PRs labelled `skip-release` merge without producing a release. When all PRs since the last tag carry `skip-release`, the release step is skipped entirely and only the `main` and `sha-*` images are published.
 
