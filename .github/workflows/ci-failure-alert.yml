@@ -1,0 +1,53 @@
+name: CI failure alert
+
+# One notifier for every pipeline workflow. It runs on `workflow_run`, which
+# fires as its own run against the default branch with full Actions-secret
+# access, regardless of what triggered the workflow that failed. That is the
+# only way to alert on failures of Dependabot-triggered runs (Dependabot
+# `pull_request` runs cannot read Actions secrets such as DISCORD_WEBHOOK_URL)
+# and of fork-PR runs (which get no secret access at all).
+#
+# Note: `workflow_run` triggers only fire once this file is on the default
+# branch, and this job runs after the fact so it cannot be a required check.
+
+on:
+  workflow_run:
+    workflows:
+      - PR Validation
+      - Main Pipeline
+      - Dependabot Auto Merge
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    name: Post failure notification to Discord
+    runs-on: ubuntu-latest
+    # Alert on hard failures only. Deliberately excludes 'cancelled',
+    # 'action_required', 'skipped', 'neutral' and 'stale', which are not
+    # release-blocking. 'startup_failure' (malformed workflow) and 'timed_out'
+    # ARE included: a watched workflow that never starts is exactly the silent
+    # stop this alert exists to catch.
+    if: ${{ contains(fromJSON('["failure", "startup_failure", "timed_out"]'), github.event.workflow_run.conclusion) }}
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      # Checks out the default branch (the trusted ref), which is what we want
+      # for the notify script regardless of the branch that failed.
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Post failure notification
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_MESSAGE: |
+            ${{ github.event.workflow_run.name }} failed on ${{ github.repository }}.
+            Branch: ${{ github.event.workflow_run.head_branch }}
+            Trigger: ${{ github.event.workflow_run.event }}
+            Run: ${{ github.event.workflow_run.html_url }}
+        run: .github/scripts/notify-discord.ps1

@@ -1,5 +1,11 @@
 name: Dependabot Auto Merge
 
+# This workflow's name ("Dependabot Auto Merge") is watched by
+# ci-failure-alert.yml (on: workflow_run) so auto-merge failures post to Discord.
+# Dependabot-triggered runs cannot read the DISCORD_WEBHOOK_URL Actions secret,
+# so the alert has to live in a separate workflow_run workflow, not here. Keep
+# this name and ci-failure-alert.yml's watch list in sync.
+
 on:
   pull_request:
     branches:
