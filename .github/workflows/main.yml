@@ -311,33 +311,6 @@ jobs:
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: .github/scripts/notify-discord.ps1
 
-  notify-discord:
-    name: Notify Discord on failures
-    runs-on: ubuntu-latest
-    needs:
-      - validate
-      - compute-version
-      - publish-main-images
-      - auto-release
-    if: >-
-      ${{ always() && (
-        needs.validate.result == 'failure' ||
-        needs.compute-version.result == 'failure' ||
-        needs.publish-main-images.result == 'failure' ||
-        needs.auto-release.result == 'failure'
-      ) }}
-    defaults:
-      run:
-        shell: pwsh
-
-    steps:
-      - name: Post failure notification
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          DISCORD_MESSAGE: |
-            Main pipeline failed.
-            Repository: ${{ github.repository }}
-            Ref: ${{ github.ref_name }}
-            Event: ${{ github.event_name }}
-            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: .github/scripts/notify-discord.ps1
+  # Failure alerts for this workflow are posted by ci-failure-alert.yml
+  # (on: workflow_run), which matches on this workflow's name ("Main Pipeline").
+  # Keep that name and ci-failure-alert.yml's watch list in sync.

@@ -49,7 +49,7 @@ The main pipeline is defined in `.github/workflows/main.yml`.
 
 On success for `main` pushes, three jobs run in sequence after `validate`:
 
-1. **`compute-version`** — collects every merged PR whose merge commit is new since the latest release tag (reachable from the pushed commit but not from the tag), takes the highest `semver:` label, and computes the next version. If all merged PRs carry `skip-release`, outputs `skip=true` and no release is created.
+1. **`compute-version`**: collects every merged PR whose merge commit is new since the latest release tag (reachable from the pushed commit but not from the tag), takes the highest `semver:` label, and computes the next version. If all merged PRs carry `skip-release`, outputs `skip=true` and no release is created.
 2. **`publish-main-images`** — builds and pushes both container images to `ghcr.io`, stamping `VERSION` and `COMMIT_SHA` into the binaries via `dotnet publish`.
 3. **`auto-release`** — skipped when `skip=true`. Creates an annotated git tag and promotes both images to versioned release tags.
 
