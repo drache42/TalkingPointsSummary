@@ -116,6 +116,10 @@ jobs:
           ${{ github.event.pull_request.head.repo.fork == false &&
               github.actor == 'dependabot[bot]' &&
               steps.dependabot-metadata.outputs.package-ecosystem == 'github-actions' }}
+        # A transient failure here (rate limit, network blip) must not flip
+        # this job's conclusion to failure - the semver label was already
+        # applied above, and label-gate is the only required check.
+        continue-on-error: true
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: .github/scripts/apply-skip-release-label.ps1
