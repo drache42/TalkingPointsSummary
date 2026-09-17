@@ -16,7 +16,13 @@ on:
     types: [completed]
 
 concurrency:
-  group: label-gate-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
+  # pull_requests[0] is empty for fork PRs on the workflow_run trigger (same
+  # reason as the fallback a few lines below), which would otherwise collapse
+  # every fork PR's group to the same key and let one fork's completion cancel
+  # another's in-progress run. head_repository/head_branch are always present
+  # on workflow_run regardless of fork status, so they disambiguate forks
+  # while same-repo PRs still key on the real PR number either way.
+  group: label-gate-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || format('{0}/{1}', github.event.workflow_run.head_repository.full_name, github.event.workflow_run.head_branch) }}
   cancel-in-progress: true
 
 permissions:
