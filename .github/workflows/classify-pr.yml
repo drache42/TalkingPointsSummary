@@ -102,3 +102,20 @@ jobs:
             PR: ${{ github.event.pull_request.title }}
             ${{ github.event.pull_request.html_url }}
         run: .github/scripts/notify-discord.ps1
+
+      # github-actions-ecosystem Dependabot PRs only touch workflow-action
+      # pins, never product code or product container images, so they still
+      # get a normal semver label (the version bump is real) but don't need
+      # a deploy - skip-release defers release/deploy per compute-version.ps1
+      # without blocking the merge (label-gate allows it alongside a semver
+      # label). docker/nuget ecosystems are left alone: docker bundles the
+      # product's own base images (infra/Dockerfile, infra/Dockerfile.admin)
+      # alongside dev-only ones, so it can't be classified by ecosystem alone.
+      - name: Apply skip-release for github-actions-only Dependabot PRs
+        if: >-
+          ${{ github.event.pull_request.head.repo.fork == false &&
+              github.actor == 'dependabot[bot]' &&
+              steps.dependabot-metadata.outputs.package-ecosystem == 'github-actions' }}
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: .github/scripts/apply-skip-release-label.ps1
