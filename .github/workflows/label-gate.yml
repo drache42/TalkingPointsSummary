@@ -15,6 +15,17 @@ on:
     workflows: ["Classify PR"]
     types: [completed]
 
+concurrency:
+  # Keyed on head repo + branch rather than PR number: pull_requests[0] on the
+  # workflow_run trigger is empty for fork PRs (same reason as the fallback a
+  # few lines below), and PR number isn't available on that event otherwise.
+  # head.repo.full_name/head.ref (pull_request) and head_repository.full_name/
+  # head_branch (workflow_run) are always present on both events regardless of
+  # fork status, and agree with each other for the same PR, so both trigger
+  # types land in one group whether the PR is same-repo or a fork.
+  group: label-gate-${{ github.event.pull_request.head.repo.full_name || github.event.workflow_run.head_repository.full_name }}-${{ github.event.pull_request.head.ref || github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
 permissions:
   pull-requests: read
   checks: write
